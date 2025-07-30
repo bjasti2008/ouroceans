@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ocean Current Simulation</title>
+    <!-- Leaflet CSS for map display -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        /* Basic reset and body styling */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif; /* Using Inter font as per instructions */
+            background: linear-gradient(135deg, #0c4a6e 0%, #164e63 100%);
+            color: white;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        /* Main container for layout */
+        .container {
+            display: flex;
+            height: 100vh; /* Full viewport height */
+        }
+
+        /* Controls sidebar styling */
+        .controls {
+            width: 300px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            overflow-y: auto; /* Enable scrolling for controls if content overflows */
+            border-right: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 0 10px 10px 0; /* Rounded right corners */
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .controls h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #60a5fa;
+            font-size: 24px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Simulation area for map and canvas */
+        .simulation-area {
+            flex: 1; /* Takes remaining space */
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Leaflet map container */
+        #mapid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1; /* Map is behind the canvas */
+            border-radius: 10px; /* Rounded corners for the map area */
+        }
+
+        /* Canvas for simulation drawing */
+        canvas {
+            display: block;
+            cursor: crosshair;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2; /* Canvas is on top of the map */
+            background: transparent; /* Make canvas background transparent to see map */
+            border-radius: 10px; /* Rounded corners for the canvas area */
+        }
+
+        /* Control group styling */
+        .control-group {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .control-group h3 {
+            margin-bottom: 10px;
+            color: #60a5fa;
+            font-size: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 5px;
+        }
+
+        /* Individual control item styling */
+        .control-item {
+            margin-bottom: 12px;
+        }
+
+        .control-item label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #cbd5e1;
+        }
+
+        .control-item input[type="range"] {
+            width: 100%;
+            margin-bottom: 5px;
+            -webkit-appearance: none; /* Remove default styling */
+            height: 8px;
+            background: #4a5568;
+            border-radius: 5px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+
+        .control-item input[type="range"]:hover {
+            opacity: 1;
+        }
+
+        .control-item input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #60a5fa;
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(96, 165, 250, 0.5);
+        }
+
+        .control-item input[type="checkbox"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+        }
+
+        /* Button styling */
+        .control-item button {
+            background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-item button:hover {
+            background: linear-gradient(45deg, #2563eb, #1e40af);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .control-item button.active {
+            background: linear-gradient(45deg, #059669, #047857);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Value display for sliders */
+        .value-display {
+            color: #60a5fa;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        /* Info panel (legend) styling */
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 250px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 3; /* Ensure info panel is above canvas */
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .info-panel h4 {
+            color: #60a5fa;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .info-panel p {
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 5px;
+        }
+
+        .legend {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 12px;
+            margin-right: 8px;
+            border-radius: 2px;
+        }
+
+        /* Stats display */
+        .stats {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 3; /* Ensure stats are above canvas */
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Climate warning box */
+        .climate-warning {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            border: 2px solid #ff6666;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+        }
+        
+        /* Info popup styles */
+        .info-popup {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid #40e0ff;
+            border-radius: 15px;
+            padding: 20px;
+            max-width: 300px;
+            z-index: 1000; /* Highest z-index for popups */
+            display: none; /* Hidden by default */
+            backdrop-filter: blur(10px); /* Glassmorphism effect */
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            transform: translate(-50%, -100%); /* Adjust for pointer */
+            pointer-events: auto; /* Allow interaction */
+        }
+        
+        .info-popup h4 {
+            color: #40e0ff;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .info-popup p {
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .info-popup .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #ff6666;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        
+        /* Info button styling (for Leaflet custom marker) */
+        .info-button-icon {
+            width: 25px;
+            height: 25px;
+            background: linear-gradient(135deg, #40e0ff, #0066cc);
+            border: 2px solid white;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+            animation: infoGlow 2s infinite;
+            z-index: 10; /* Above other map elements */
+        }
+        
+        .info-button-icon:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(64, 224, 255, 0.6);
+        }
+        
+        @keyframes infoGlow {
+            0%, 100% { box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5); }
+            50% { box-shadow: 0 4px 15px rgba(64, 224, 255, 0.8); }
+        }
+        
+        /* Climate impact indicators */
+        .climate-impact {
+            position: absolute;
+            pointer-events: none; /* Do not block mouse events on canvas */
+            font-size: 12px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            animation: float 3s ease-in-out infinite;
+            z-index: 5; /* Above canvas, below popups */
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .flood-indicator {
+            color: #ff4444;
+        }
+        
+        .storm-indicator {
+            color: #ffaa00;
+        }
+        
+        .ice-melt-indicator {
+            color: #00ffff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h2>Ocean Current Simulation</h2>
+            <div class="climate-warning">
+                <h4>🌡️ Climate Impact Alert</h4>
+                <p>Current settings show <span id="climate-impact-text">moderate</span> climate change effects on ocean currents.</p>
+            </div>
+            <div class="control-group">
+                <h3>Simulation Controls</h3>
+                <div class="control-item">
+                    <button id="playPause">⏸️ Pause</button>
+                    <button id="reset">🔄 Reset</button>
+                </div>
+                <div class="control-item">
+                    <label>Simulation Speed</label>
+                    <input type="range" id="speed" min="0.1" max="3" value="1" step="0.1">
+                    <div class="value-display">Speed: <span id="speedValue">1.0</span>x</div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Environmental Forces</h3>
+                <div class="control-item">
+                    <label>Wind Speed</label>
+                    <input type="range" id="windSpeed" min="0" max="50" value="15" step="1">
+                    <div class="value-display">Wind: <span id="windSpeedValue">15</span> m/s</div>
+                </div>
+                <div class="control-item">
+                    <label>Wind Direction</label>
+                    <input type="range" id="windDirection" min="0" max="360" value="45" step="5">
+                    <div class="value-display">Direction: <span id="windDirectionValue">45</span>°</div>
+                </div>
+                <div class="control-item">
+                    <label>Ocean Temperature</label>
+                    <input type="range" id="temperature" min="0" max="30" value="20" step="1">
+                    <div class="value-display">Temp: <span id="temperatureValue">20</span>°C</div>
+                </div>
+                <div class="control-item">
+                    <label>Salinity</label>
+                    <input type="range" id="salinity" min="30" max="40" value="35" step="0.1">
+                    <div class="value-display">Salinity: <span id="salinityValue">35</span> ppt</div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Visualization</h3>
+                <div class="control-item">
+                    <button id="currentMode" class="active">Current Flow</button>
+                    <button id="temperatureMode">Temperature</button>
+                    <button id="salinityMode">Salinity</button>
+                </div>
+                <div class="control-item">
+                    <label>
+                        <input type="checkbox" id="showParticles" checked>
+                        Show Particles
+                    </label>
+                </div>
+                <div class="control-item">
+                    <label>
+                        <input type="checkbox" id="showVectors" checked>
+                        Show Velocity Vectors
+                    </label>
+                </div>
+                <div class="control-item">
+                    <label>Particle Count</label>
+                    <input type="range" id="particleCount" min="100" max="10000" value="5000" step="100">
+                    <div class="value-display">Particles: <span id="particleCountValue">5000</span></div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Interaction</h3>
+                <div class="control-item">
+                    <p style="font-size: 12px; color: #cbd5e1;">Click and drag on the simulation to create currents</p>
+                </div>
+            </div>
+            
+            <div class="control-group">
+              <h3>🌍 Climate Change Effects</h3>
+              <div class="control-item">
+                  <label>Global Temperature Rise</label>
+                  <input type="range" id="globalTempRise" min="0" max="5" value="1.5" step="0.1">
+                  <div class="value-display">Rise: <span id="globalTempRiseValue">1.5</span>°C</div>
+              </div>
+              <div class="control-item">
+                  <label>Sea Level Rise</label>
+                  <input type="range" id="seaLevelRise" min="0" max="2" value="0.2" step="0.05">
+                  <div class="value-display">Rise: <span id="seaLevelRiseValue">0.2</span>m</div>
+              </div>
+              <div class="control-item">
+                  <label>Ice Sheet Melting Rate</label>
+                  <input type="range" id="iceMeltRate" min="0" max="100" value="30" step="5">
+                  <div class="value-display">Rate: <span id="iceMeltRateValue">30</span>%</div>
+              </div>
+              <div class="control-item">
+                  <label>
+                      <input type="checkbox" id="showClimateEffects" checked>
+                      Show Climate Impact Indicators
+                  </label>
+              </div>
+          </div>
+          
+          <div class="control-group">
+              <h3>⚠️ Weather Patterns</h3>
+              <div class="control-item">
+                  <label>Storm Intensity</label>
+                  <input type="range" id="stormIntensity" min="0" max="10" value="3" step="1">
+                  <div class="value-display">Intensity: <span id="stormIntensityValue">3</span>/10</div>
+              </div>
+              <div class="control-item">
+                  <label>Extreme Weather Frequency</label>
+                  <input type="range" id="extremeWeatherFreq" min="1" max="20" value="5" step="1">
+                  <div class="value-display">Events/year: <span id="extremeWeatherFreqValue">5</span></div>
+              </div>
+          </div>
+        </div>
+
+        <div class="simulation-area">
+            <!-- Leaflet Map Container -->
+            <div id="mapid"></div>
+            
+            <!-- Canvas for particle and vector simulation -->
+            <canvas id="simulationCanvas"></canvas>
+            
+            <!-- Single reusable Info Popup element, positioned by JS -->
+            <div class="info-popup" id="global-info-popup">
+                <button class="close-btn">&times;</button>
+                <h4 id="popup-title"></h4>
+                <p id="popup-content"></p>
+            </div>
+            
+            <div class="info-panel">
+                <h4>Current Conditions</h4>
+                <div class="legend">
+                    <div class="legend-color" style="background: #3b82f6;"></div>
+                    <span>Cold Water (&lt;10°C)</span>
+                </div>
+                <div class="legend">
+                    <div class="legend-color" style="background: #10b981;"></div>
+                    <span>Moderate (10-20°C)</span>
+                </div>
+                <div class="legend">
+                    <div class="legend-color" style="background: #f59e0b;"></div>
+                    <span>Warm Water (&gt;20°C)</span>
+                </div>
+                <p><strong>Mode:</strong> <span id="currentMode-text">Current Flow</span></p>
+                <p><strong>Active Particles:</strong> <span id="particleCount-text">5000</span></p>
+            </div>
+
+            <div class="stats">
+                <div>FPS: <span id="fps">60</span></div>
+                <div>Time: <span id="simTime">0.0</span>s</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JavaScript library -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        class OceanCurrentSimulation {
+            constructor() {
+                this.canvas = document.getElementById('simulationCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.isRunning = true;
+                this.time = 0;
+                this.lastTime = 0;
+                this.fps = 0;
+                this.frameCount = 0;
+                
+                // Simulation parameters
+                this.gridSize = 16;
+                this.damping = 0.99;
+                this.viscosity = 0.0001;
+                this.dt = 0.016; // Fixed timestep for consistent simulation speed
+                
+                // Environmental parameters
+                this.windSpeed = 15;
+                this.windDirection = 45; // Degrees
+                this.temperature = 20; // Initial average temperature
+                this.salinity = 35; // Initial average salinity (ppt)
+                this.speed = 1; // Simulation speed multiplier
+                
+                // Climate change parameters
+                this.globalTempRise = 1.5; // Global temperature increase in °C
+                this.seaLevelRise = 0.2; // Sea level rise in meters
+                this.iceMeltRate = 30; // Percentage of ice sheet melting
+                this.stormIntensity = 3; // Storm intensity (1-10)
+                this.extremeWeatherFreq = 5; // Extreme weather events per simulated year
+                this.showClimateEffects = true; // Toggle for climate impact indicators
+                
+                // Climate effects and indicators
+                this.climateIndicators = []; // Array to hold active climate impact indicators
+                this.thermohalineStrength = 1.0; // Strength of thermohaline circulation (0-1)
+                this.stormCenters = []; // Array to hold active storm centers
+                
+                // Visualization mode
+                this.visualizationMode = 'current'; // 'current', 'temperature', or 'salinity'
+                this.showParticles = true;
+                this.showVectors = true;
+                this.particleCount = 5000; // Increased particle count for denser flow
+                
+                // Mouse interaction for drawing currents
+                this.mouseX = 0;
+                this.mouseY = 0;
+                this.isMouseDown = false;
+                this.lastMouseX = 0;
+                this.lastMouseY = 0;
+
+                // Info popup elements
+                this.infoPopup = document.getElementById('global-info-popup');
+                this.popupTitle = document.getElementById('popup-title');
+                this.popupContent = document.getElementById('popup-content');
+                this.closePopupBtn = this.infoPopup.querySelector('.close-btn');
+
+                // Define info points with LatLng coordinates and content
+                this.infoPoints = [
+                    { lat: 35, lng: -70, title: '🌊 Gulf Stream (North Atlantic)', content: 'The Gulf Stream is weakening by 15% due to Arctic ice melt disrupting the Atlantic Meridional Overturning Circulation (AMOC). <strong>Local Impact:</strong> Cooler winters in Europe, sea level rise along US East Coast, changes in fish migration patterns.' },
+                    { lat: 75, lng: -40, title: '🧊 Arctic Ocean (Greenland)', content: 'Greenland ice sheet losing 280 billion tons of ice annually, adding freshwater that disrupts density-driven ocean currents. <strong>Local Impact:</strong> Accelerated Arctic warming, polar bear habitat loss, disrupted weather patterns across Northern Hemisphere.' },
+                    { lat: 15, lng: -100, title: '🌀 Eastern Pacific Hurricane Zone', content: 'Warmer Pacific waters are intensifying hurricanes. Each 1°C increase can strengthen storms by 5-10% with higher wind speeds. <strong>Local Impact:</strong> More Category 4-5 hurricanes, coastal flooding in Mexico and Central America, disrupted marine ecosystems.' },
+                    { lat: 0, lng: 80, title: '🌊 Indian Ocean Dipole', content: 'Climate change is making the Indian Ocean Dipole more extreme, affecting monsoon patterns and ocean temperatures. <strong>Local Impact:</strong> Irregular monsoons affecting 1.5 billion people, coral bleaching, changes in tuna migration routes.' },
+                    { lat: -60, lng: 0, title: '🧊 Antarctic Circumpolar Current', content: 'The world\'s strongest ocean current is warming and changing flow patterns as Antarctic ice shelves melt faster than ever. <strong>Local Impact:</strong> Global sea level rise, changes in global ocean circulation, penguin population decline.' },
+                    { lat: 30, lng: 140, title: '🌊 Kuroshio Current (Japan)', content: 'Japan\'s "Black Current" is shifting northward due to warming, affecting regional climate and marine biodiversity. <strong>Local Impact:</strong> Changes in Japanese seasonal patterns, fish species migration, increased typhoon intensity.' }
+                ];
+                
+                this.setupMap(); // Initialize Leaflet map
+                this.setupCanvas(); // Setup and resize canvas
+                this.initializeGrid(); // Initialize fluid simulation grid
+                this.initializeParticles(); // Initialize particles for visualization
+                this.setupEventListeners(); // Set up all UI event listeners
+                this.setupInfoButtons(); // Set up the Leaflet-based info buttons
+                this.animate(); // Start the animation loop
+            }
+
+            /**
+             * Initializes the Leaflet map and adds a world map image overlay.
+             * Disables map interaction to allow canvas interaction.
+             */
+            setupMap() {
+                // Initialize Leaflet map with a simple CRS for image overlay
+                this.map = L.map('mapid', {
+                    crs: L.CRS.Simple,
+                    minZoom: -2,
+                    maxZoom: 2,
+                    zoomControl: false, // Hide default zoom control
+                    attributionControl: false // Hide Leaflet attribution
+                });
+
+                // URL for a blank world map image
+                const imageUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/1000px-World_map_blank_without_borders.svg.png';
+                // Define the bounds for the image overlay (approximate for a 1000x500 map)
+                // [south-west corner, north-east corner] in Leaflet's simple CRS coordinates
+                const imageBounds = [[-250, -500], [250, 500]]; // Adjusted to center a 1000x500 image, assuming 0,0 is center
+
+                // Create and add the image overlay to the map
+                L.imageOverlay(imageUrl, imageBounds).addTo(this.map);
+
+                // Set the map view to fit the image bounds
+                this.map.fitBounds(imageBounds);
+
+                // Disable all map interactions (panning, zooming, etc.)
+                this.map.dragging.disable();
+                this.map.touchZoom.disable();
+                this.map.doubleClickZoom.disable();
+                this.map.scrollWheelZoom.disable();
+                this.map.boxZoom.disable();
+                this.map.keyboard.disable();
+                if (this.map.tap) this.map.tap.disable(); // Disable tap on mobile devices
+            }
+            
+            /**
+             * Sets up the canvas dimensions and adds a resize listener.
+             */
+            setupCanvas() {
+                const resize = () => {
+                    // Get dimensions from the parent container (simulation-area)
+                    const rect = this.canvas.parentElement.getBoundingClientRect();
+                    this.canvas.width = rect.width;
+                    this.canvas.height = rect.height;
+                    this.width = this.canvas.width;
+                    this.height = this.canvas.height;
+                    // Recalculate grid dimensions based on new canvas size
+                    this.cols = Math.floor(this.width / this.gridSize);
+                    this.rows = Math.floor(this.height / this.gridSize);
+                    this.initializeGrid(); // Re-initialize grid on resize
+                    this.initializeParticles(); // Re-initialize particles on resize
+                };
+                
+                resize(); // Initial resize
+                window.addEventListener('resize', resize); // Listen for window resize events
+            }
+            
+            /**
+             * Initializes the velocity, pressure, temperature, salinity, and divergence grids.
+             * Adds some initial gyre patterns for visual interest.
+             */
+            initializeGrid() {
+                this.velocityX = [];
+                this.velocityY = [];
+                this.pressure = [];
+                this.temperature_grid = [];
+                this.salinity_grid = [];
+                this.divergence = [];
+                
+                for (let i = 0; i < this.rows; i++) {
+                    this.velocityX[i] = [];
+                    this.velocityY[i] = [];
+                    this.pressure[i] = [];
+                    this.temperature_grid[i] = [];
+                    this.salinity_grid[i] = [];
+                    this.divergence[i] = [];
+                    
+                    for (let j = 0; j < this.cols; j++) {
+                        this.velocityX[i][j] = 0;
+                        this.velocityY[i][j] = 0;
+                        this.pressure[i][j] = 0;
+                        // Initialize temperature and salinity with slight random variations
+                        this.temperature_grid[i][j] = this.temperature + (Math.random() - 0.5) * 5;
+                        this.salinity_grid[i][j] = this.salinity + (Math.random() - 0.5) * 2;
+                        this.divergence[i][j] = 0;
+                    }
+                }
+                
+                // Add some initial current patterns (gyres) - increased strength
+                this.addGyre(this.cols * 0.3, this.rows * 0.3, 1.0); // Counter-clockwise gyre
+                this.addGyre(this.cols * 0.7, this.rows * 0.7, -0.6); // Clockwise gyre
+            }
+            
+            /**
+             * Adds a circular current (gyre) to the velocity field.
+             * @param {number} centerX - X coordinate of the gyre center in grid units.
+             * @param {number} centerY - Y coordinate of the gyre center in grid units.
+             * @param {number} strength - Strength and direction of the gyre.
+             */
+            addGyre(centerX, centerY, strength) {
+                const radius = 80; // Radius of the gyre influence
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        const dx = j - centerX;
+                        const dy = i - centerY;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance < radius) {
+                            const factor = (1 - distance / radius) * strength; // Strength decreases with distance from center
+                            this.velocityX[i][j] += -dy * factor * 0.1; // Perpendicular to radius for circular motion
+                            this.velocityY[i][j] += dx * factor * 0.1;
+                        }
+                    }
+                }
+            }
+            
+            /**
+             * Initializes the array of particles for flow visualization.
+             */
+            initializeParticles() {
+                this.particles = [];
+                for (let i = 0; i < this.particleCount; i++) {
+                    this.particles.push({
+                        x: Math.random() * this.width, // Random initial X position
+                        y: Math.random() * this.height, // Random initial Y position
+                        vx: 0, // Velocity X
+                        vy: 0, // Velocity Y
+                        life: Math.random() * 100 + 100, // Increased initial life for longer trails
+                        maxLife: 200, // Increased maximum life for longer trails
+                        size: Math.random() * 0.8 + 0.2 // Smaller particle size for denser look
+                    });
+                }
+            }
+            
+            /**
+             * Updates the position and state of each particle based on the fluid velocity field.
+             */
+            updateParticles() {
+                for (let particle of this.particles) {
+                    // Get grid coordinates for the particle's current position
+                    const gridX = Math.floor(particle.x / this.gridSize);
+                    const gridY = Math.floor(particle.y / this.gridSize);
+                    
+                    // Check if particle is within grid bounds
+                    if (gridX >= 0 && gridX < this.cols && gridY >= 0 && gridY < this.rows) {
+                        // Get interpolated velocity from the grid
+                        const vx = this.velocityX[gridY][gridX];
+                        const vy = this.velocityY[gridY][gridX];
+                        
+                        // Update particle velocity with fluid velocity and some randomness
+                        particle.vx = vx * 50 + (Math.random() - 0.5) * 0.5; // Scale velocity for visual effect
+                        particle.vy = vy * 50 + (Math.random() - 0.5) * 0.5;
+                        
+                        // Update particle position based on its velocity and simulation speed
+                        particle.x += particle.vx * this.dt * this.speed;
+                        particle.y += particle.vy * this.dt * this.speed;
+                        
+                        // Wrap-around boundary conditions for particles
+                        if (particle.x < 0) particle.x = this.width;
+                        if (particle.x > this.width) particle.x = 0;
+                        if (particle.y < 0) particle.y = this.height;
+                        if (particle.y > this.height) particle.y = 0;
+                        
+                        // Decrease particle life and respawn if life runs out
+                        particle.life--;
+                        if (particle.life <= 0) {
+                            particle.x = Math.random() * this.width;
+                            particle.y = Math.random() * this.height;
+                            particle.life = particle.maxLife;
+                        }
+                    } else {
+                        // If particle goes out of bounds (e.g., due to initial random placement), respawn it
+                        particle.x = Math.random() * this.width;
+                        particle.y = Math.random() * this.height;
+                        particle.life = particle.maxLife;
+                    }
+                }
+            }
+            
+            /**
+             * Updates the fluid velocity field based on external forces (wind, temperature, salinity),
+             * mouse interaction, and applies damping and pressure projection.
+             */
+            updateFluidDynamics() {
+                // Apply wind force uniformly across the grid
+                const windForceX = Math.cos(this.windDirection * Math.PI / 180) * this.windSpeed * 0.001;
+                const windForceY = Math.sin(this.windDirection * Math.PI / 180) * this.windSpeed * 0.001;
+                
+                for (let i = 1; i < this.rows - 1; i++) {
+                    for (let j = 1; j < this.cols - 1; j++) {
+                        this.velocityX[i][j] += windForceX * this.dt;
+                        this.velocityY[i][j] += windForceY * this.dt;
+                        
+                        // Apply thermal and salinity effects (simplified thermohaline circulation)
+                        // Adjust temperature and salinity based on global climate parameters
+                        const adjustedTemperature = this.temperature_grid[i][j] + this.globalTempRise;
+                        // Salinity decreases with ice melt, affecting density-driven currents
+                        const adjustedSalinity = this.salinity_grid[i][j] - (this.iceMeltRate / 100) * 5; 
+
+                        // Temperature effect: warmer water tends to rise (negative Y velocity)
+                        const tempEffect = (adjustedTemperature - 20) * 0.0001 * this.thermohalineStrength;
+                        // Salinity effect: less saline water tends to rise (negative Y velocity)
+                        const salinityEffect = (adjustedSalinity - 35) * 0.0001 * this.thermohalineStrength;
+                        
+                        this.velocityY[i][j] += tempEffect * this.dt;
+                        this.velocityX[i][j] += salinityEffect * this.dt;
+                    }
+                }
+                
+                // Apply mouse interaction force (click and drag to create currents)
+                if (this.isMouseDown) {
+                    const forceX = (this.mouseX - this.lastMouseX) * 0.1;
+                    const forceY = (this.mouseY - this.lastMouseY) * 0.1;
+                    const mouseGridX = Math.floor(this.mouseX / this.gridSize);
+                    const mouseGridY = Math.floor(this.mouseY / this.gridSize);
+                    
+                    const radius = 5; // Radius of mouse influence
+                    for (let i = -radius; i <= radius; i++) {
+                        for (let j = -radius; j <= radius; j++) {
+                            const gridX = mouseGridX + j;
+                            const gridY = mouseGridY + i;
+                            
+                            if (gridX >= 0 && gridX < this.cols && gridY >= 0 && gridY < this.rows) {
+                                const distance = Math.sqrt(i * i + j * j);
+                                if (distance <= radius) {
+                                    const strength = (1 - distance / radius) * 0.5; // Strength decreases with distance
+                                    this.velocityX[gridY][gridX] += forceX * strength;
+                                    this.velocityY[gridY][gridX] += forceY * strength;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Apply damping to gradually reduce velocity
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        this.velocityX[i][j] *= this.damping;
+                        this.velocityY[i][j] *= this.damping;
+
+                        // Advect (move) temperature and salinity values with the fluid flow
+                        this.temperature_grid[i][j] = this.advectScalar(this.temperature_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
+                        this.salinity_grid[i][j] = this.advectScalar(this.salinity_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
+                    }
+                }
+
+                // Project velocities to make the flow divergence-free (incompressible)
+                this.project();
+
+                // Calculate thermohaline circulation strength based on climate parameters
+                const baseThermohalineStrength = 1.0;
+                const tempWeakening = (this.globalTempRise / 5) * 0.5; // Up to 50% weakening for 5°C rise
+                const iceMeltWeakening = (this.iceMeltRate / 100) * 0.5; // Up to 50% weakening for 100% melt
+                this.thermohalineStrength = baseThermohalineStrength - tempWeakening - iceMeltWeakening;
+                this.thermohalineStrength = Math.max(0, this.thermohalineStrength); // Cannot go below 0
+
+                // Randomly add storms based on extreme weather frequency
+                if (Math.random() < this.extremeWeatherFreq * 0.0001 * this.dt) {
+                    this.addStorm(this.stormIntensity);
+                }
+
+                // Update storm positions and apply their effects
+                this.updateStorms();
+
+                // Update the climate warning text in the UI
+                this.updateClimateWarning();
+            }
+
+            /**
+             * Advects (moves) a scalar quantity (like temperature or salinity) through the grid
+             * based on the fluid velocity. Uses a simple backward tracing method.
+             * @param {Array<Array<number>>} scalarGrid - The grid of scalar values.
+             * @param {number} i - Row index.
+             * @param {number} j - Column index.
+             * @param {number} vx - Velocity X at (i, j).
+             * @param {number} vy - Velocity Y at (i, j).
+             * @returns {number} The advected scalar value.
+             */
+            advectScalar(scalarGrid, i, j, vx, vy) {
+                // Trace back the particle's previous position
+                const prevX = j * this.gridSize - vx * this.dt * 50; // Scale velocity for advection
+                const prevY = i * this.gridSize - vy * this.dt * 50;
+
+                // Get grid coordinates of the previous position
+                const prevGridX = Math.floor(prevX / this.gridSize);
+                const prevGridY = Math.floor(prevY / this.gridSize);
+
+                // If previous position is within bounds, return its value; otherwise, return current value
+                if (prevGridX >= 0 && prevGridX < this.cols && prevGridY >= 0 && prevGridY < this.rows) {
+                    return scalarGrid[prevGridY][prevGridX];
+                }
+                return scalarGrid[i][j];
+            }
+
+            /**
+             * Performs pressure projection to make the velocity field divergence-free.
+             * This involves calculating divergence, solving for pressure, and subtracting
+             * the pressure gradient from velocities.
+             */
+            project() {
+                // Calculate divergence for each cell
+                for (let i = 1; i < this.rows - 1; i++) {
+                    for (let j = 1; j < this.cols - 1; j++) {
+                        this.divergence[i][j] = -0.5 * (
+                            this.velocityX[i][j+1] - this.velocityX[i][j-1] + // Difference in X velocity
+                            this.velocityY[i+1][j] - this.velocityY[i-1][j]   // Difference in Y velocity
+                        ) / this.gridSize;
+                        this.pressure[i][j] = 0; // Reset pressure for iteration
+                    }
+                }
+
+                // Solve for pressure using Jacobi iteration (iteratively smooth pressure field)
+                const numIterations = 20; // Number of iterations for pressure solver
+                for (let k = 0; k < numIterations; k++) {
+                    for (let i = 1; i < this.rows - 1; i++) {
+                        for (let j = 1; j < this.cols - 1; j++) {
+                            this.pressure[i][j] = (
+                                this.divergence[i][j] +
+                                this.pressure[i][j+1] + this.pressure[i][j-1] +
+                                this.pressure[i+1][j] + this.pressure[i-1][j]
+                            ) / 4; // Average of neighbors plus divergence
+                        }
+                    }
+                }
+
+                // Subtract pressure gradient from velocity to make it divergence-free
+                for (let i = 1; i < this.rows - 1; i++) {
+                    for (let j = 1; j < this.cols - 1; j++) {
+                        this.velocityX[i][j] -= 0.5 * (this.pressure[i][j+1] - this.pressure[i][j-1]) / this.gridSize;
+                        this.velocityY[i][j] -= 0.5 * (this.pressure[i+1][j] - this.pressure[i-1][j]) / this.gridSize;
+                    }
+                }
+            }
+
+            /**
+             * Adds a new storm to the simulation at a random location.
+             * @param {number} intensity - The intensity of the storm.
+             */
+            addStorm(intensity) {
+                const x = Math.random() * this.width;
+                const y = Math.random() * this.height;
+                const radius = (intensity / 10) * 100 + 50; // Larger radius for higher intensity
+                const duration = Math.random() * 300 + 200; // Duration in frames
+                this.stormCenters.push({ x, y, radius, intensity, life: duration });
+                if (this.showClimateEffects) {
+                    this.addClimateIndicator(x, y, 'storm'); // Add a visual storm indicator
+                }
+            }
+
+            /**
+             * Updates existing storms and applies their rotational force to the fluid.
+             */
+            updateStorms() {
+                for (let k = this.stormCenters.length - 1; k >= 0; k--) {
+                    const storm = this.stormCenters[k];
+                    storm.life--;
+                    if (storm.life <= 0) {
+                        this.stormCenters.splice(k, 1); // Remove storm if its life is over
+                        continue;
+                    }
+
+                    // Apply rotational force around the storm center
+                    for (let i = 0; i < this.rows; i++) {
+                        for (let j = 0; j < this.cols; j++) {
+                            const gridX = j * this.gridSize;
+                            const gridY = i * this.gridSize;
+                            const dx = gridX - storm.x;
+                            const dy = gridY - storm.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+
+                            if (distance < storm.radius) {
+                                const factor = (1 - distance / storm.radius) * (storm.intensity / 10) * 0.05;
+                                this.velocityX[i][j] += -dy * factor; // Rotate velocity around storm center
+                                this.velocityY[i][j] += dx * factor;
+                            }
+                        }
+                    }
+                }
+            }
+
+            /**
+             * Adds a visual climate impact indicator (e.g., flood, storm, ice melt) to the simulation area.
+             * @param {number} x - X position for the indicator.
+             * @param {number} y - Y position for the indicator.
+             * @param {string} type - Type of indicator ('flood', 'storm', 'ice-melt').
+             */
+            addClimateIndicator(x, y, type) {
+                const indicator = document.createElement('div');
+                indicator.classList.add('climate-impact');
+                indicator.style.left = `${x}px`;
+                indicator.style.top = `${y}px`;
+                if (type === 'flood') {
+                    indicator.classList.add('flood-indicator');
+                    indicator.textContent = '🌊 Flood Risk!';
+                } else if (type === 'storm') {
+                    indicator.classList.add('storm-indicator');
+                    indicator.textContent = '🌀 Extreme Storm!';
+                } else if (type === 'ice-melt') {
+                    indicator.classList.add('ice-melt-indicator');
+                    indicator.textContent = '🧊 Ice Melt!';
+                }
+                document.querySelector('.simulation-area').appendChild(indicator); // Append to simulation-area
+                this.climateIndicators.push({ element: indicator, life: 300 }); // Indicator lasts 5 seconds (300 frames)
+            }
+
+            /**
+             * Updates the life and opacity of active climate impact indicators.
+             */
+            updateClimateIndicators() {
+                for (let i = this.climateIndicators.length - 1; i >= 0; i--) {
+                    const indicator = this.climateIndicators[i];
+                    indicator.life--;
+                    indicator.element.style.opacity = indicator.life / 300; // Fade out
+                    if (indicator.life <= 0) {
+                        indicator.element.remove(); // Remove from DOM
+                        this.climateIndicators.splice(i, 1); // Remove from array
+                    }
+                }
+            }
+            
+            /**
+             * Clears the canvas and draws the simulation elements based on the current visualization mode.
+             */
+            draw() {
+                // Draw a very subtle, semi-transparent black rectangle over the canvas
+                // This creates the "trail" effect for particles, making them appear as continuous lines.
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; // Adjust opacity for desired trail length/fading
+                this.ctx.fillRect(0, 0, this.width, this.height);
+                
+                // Draw background based on visualization mode
+                if (this.visualizationMode === 'temperature') {
+                    this.drawTemperature();
+                } else if (this.visualizationMode === 'salinity') {
+                    this.drawSalinity();
+                } else { // Current Flow mode (default)
+                    // In current flow mode, particles are the primary visual. Vectors are optional.
+                    if (this.showVectors) {
+                        this.drawVelocityVectors(); // Draw velocity arrows
+                    }
+                }
+
+                // Always draw particles if enabled
+                if (this.showParticles) {
+                    this.drawParticles();
+                }
+                this.ctx.globalAlpha = 1.0; // Reset global alpha
+            }
+
+            /**
+             * Draws the temperature distribution on the canvas using color coding.
+             */
+            drawTemperature() {
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        const temp = this.temperature_grid[i][j];
+                        let color;
+                        if (temp < 10) {
+                            color = '#3b82f6'; // Cold (blue)
+                        } else if (temp < 20) {
+                            color = '#10b981'; // Moderate (green)
+                        } else {
+                            color = '#f59e0b'; // Warm (orange)
+                        }
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
+                    }
+                }
+            }
+
+            /**
+             * Draws the salinity distribution on the canvas using color coding.
+             */
+            drawSalinity() {
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        const salt = this.salinity_grid[i][j];
+                        let color;
+                        if (salt < 33) {
+                            color = '#e0f2fe'; // Low salinity (light blue)
+                        } else if (salt < 36) {
+                            color = '#93c5fd'; // Moderate salinity (medium blue)
+                        } else {
+                            color = '#1e40af'; // High salinity (dark blue)
+                        }
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
+                    }
+                }
+            }
+            
+            /**
+             * Draws the particles on the canvas.
+             */
+            drawParticles() {
+                for (let particle of this.particles) {
+                    const alpha = particle.life / particle.maxLife; // Opacity based on life
+                    this.ctx.globalAlpha = alpha;
+
+                    // Color particles based on velocity magnitude for a flow-like effect
+                    // Map velocity magnitude to a hue range (e.g., blue to green)
+                    const velocityMagnitude = Math.sqrt(particle.vx * particle.vx + particle.vy * particle.vy);
+                    let hue;
+                    const maxVelColor = 50; // Max velocity for color mapping
+                    // Hue from green (120) to blue (240)
+                    hue = 120 + (velocityMagnitude / maxVelColor) * 120; 
+                    hue = Math.max(120, Math.min(240, hue)); // Clamp hue value between 120 (green) and 240 (blue)
+                    this.ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`; // HSL color with alpha
+
+                    this.ctx.beginPath();
+                    this.ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
+                this.ctx.globalAlpha = 1.0; // Reset alpha
+            }
+            
+            /**
+             * Draws velocity vectors (arrows) on the canvas to indicate current flow direction and strength.
+             */
+            drawVelocityVectors() {
+                this.ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)'; // Cyan color for vectors
+                this.ctx.lineWidth = 1;
+                for (let i = 0; i < this.rows; i += 2) { // Draw every other row/column for clarity
+                    for (let j = 0; j < this.cols; j += 2) {
+                        const x = j * this.gridSize + this.gridSize / 2;
+                        const y = i * this.gridSize + this.gridSize / 2;
+                        const vx = this.velocityX[i][j] * 50; // Scale vector length for visibility
+                        const vy = this.velocityY[i][j] * 50;
+                        
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, y);
+                        this.ctx.lineTo(x + vx, y + vy);
+                        this.ctx.stroke();
+                        
+                        // Draw arrow head
+                        const angle = Math.atan2(vy, vx);
+                        this.ctx.save();
+                        this.ctx.translate(x + vx, y + vy);
+                        this.ctx.rotate(angle);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(0, 0);
+                        this.ctx.lineTo(-5, -3);
+                        this.ctx.lineTo(-5, 3);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                        this.ctx.restore();
+                    }
+                }
+            }
+            
+            /**
+             * The main animation loop. Updates simulation, draws, and requests next frame.
+             * @param {DOMHighResTimeStamp} currentTime - The current time provided by requestAnimationFrame.
+             */
+            animate(currentTime) {
+                // If simulation is paused, just request next frame and return
+                if (!this.isRunning) {
+                    requestAnimationFrame((t) => this.animate(t));
+                    return;
+                }
+
+                // Calculate delta time for consistent updates
+                if (!this.lastTime) this.lastTime = currentTime;
+                const deltaTime = (currentTime - this.lastTime) / 1000; // Convert to seconds
+                this.lastTime = currentTime;
+
+                this.time += deltaTime * this.speed; // Update simulation time
+                this.frameCount++;
+
+                // Update FPS every second
+                if (currentTime - (this.fpsLastUpdateTime || 0) >= 1000) {
+                    this.fps = this.frameCount;
+                    this.frameCount = 0;
+                    this.fpsLastUpdateTime = currentTime;
+                }
+
+                this.updateFluidDynamics(); // Update fluid velocities, temperature, salinity
+                this.updateParticles(); // Move particles
+                this.updateClimateIndicators(); // Update visual climate indicators
+                this.draw(); // Redraw canvas
+                this.updateUI(); // Update UI elements
+
+                requestAnimationFrame((t) => this.animate(t)); // Request next animation frame
+            }
+
+            /**
+             * Updates various UI elements with current simulation values.
+             */
+            updateUI() {
+                document.getElementById('fps').textContent = this.fps;
+                document.getElementById('simTime').textContent = this.time.toFixed(1);
+                document.getElementById('speedValue').textContent = this.speed.toFixed(1);
+                document.getElementById('windSpeedValue').textContent = this.windSpeed;
+                document.getElementById('windDirectionValue').textContent = this.windDirection;
+                document.getElementById('temperatureValue').textContent = this.temperature;
+                document.getElementById('salinityValue').textContent = this.salinity.toFixed(1);
+                document.getElementById('particleCountValue').textContent = this.particleCount;
+                // Update visualization mode text in info panel
+                document.getElementById('currentMode-text').textContent = 
+                    this.visualizationMode === 'current' ? 'Current Flow' : 
+                    this.visualizationMode === 'temperature' ? 'Temperature' : 'Salinity';
+                document.getElementById('globalTempRiseValue').textContent = this.globalTempRise.toFixed(1);
+                document.getElementById('seaLevelRiseValue').textContent = this.seaLevelRise.toFixed(2);
+                document.getElementById('iceMeltRateValue').textContent = this.iceMeltRate;
+                document.getElementById('stormIntensityValue').textContent = this.stormIntensity;
+                document.getElementById('extremeWeatherFreqValue').textContent = this.extremeWeatherFreq;
+
+                this.updateClimateWarning(); // Update climate warning box
+            }
+
+            /**
+             * Updates the climate warning message and its visual styling based on climate parameters.
+             */
+            updateClimateWarning() {
+                let impact = 'moderate';
+                const warningDiv = document.querySelector('.climate-warning');
+                // Determine impact level
+                if (this.globalTempRise > 2.0 || this.seaLevelRise > 0.5 || this.iceMeltRate > 50 || this.stormIntensity > 7) {
+                    impact = 'severe';
+                } else if (this.globalTempRise > 1.0 || this.seaLevelRise > 0.1 || this.iceMeltRate > 20 || this.stormIntensity > 4) {
+                    impact = 'elevated';
+                }
+                document.getElementById('climate-impact-text').textContent = impact;
+                
+                // Apply styling based on impact level
+                if (impact === 'severe') {
+                    warningDiv.style.background = 'linear-gradient(135deg, #ff0000, #990000)';
+                    warningDiv.style.borderColor = '#ff3333';
+                } else if (impact === 'elevated') {
+                    warningDiv.style.background = 'linear-gradient(135deg, #ff8c00, #cc7000)';
+                    warningDiv.style.borderColor = '#ffa500';
+                } else {
+                    warningDiv.style.background = 'linear-gradient(135deg, #0c4a6e 0%, #164e63 100%)';
+                    warningDiv.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                }
+            }
+
+            /**
+             * Sets up all event listeners for UI controls and mouse interaction.
+             */
+            setupEventListeners() {
+                // Play/Pause button
+                document.getElementById('playPause').addEventListener('click', () => {
+                    this.isRunning = !this.isRunning;
+                    document.getElementById('playPause').textContent = this.isRunning ? '⏸️ Pause' : '▶️ Play';
+                    if (this.isRunning) this.animate(performance.now()); // Resume animation if paused
+                });
+
+                // Reset button
+                document.getElementById('reset').addEventListener('click', () => {
+                    this.initializeGrid(); // Reset fluid grid
+                    this.initializeParticles(); // Reset particles
+                    this.time = 0; // Reset simulation time
+                    this.climateIndicators.forEach(indicator => indicator.element.remove()); // Clear visual indicators
+                    this.climateIndicators = [];
+                    this.stormCenters = []; // Clear active storms
+                });
+
+                // Slider inputs
+                document.getElementById('speed').addEventListener('input', (e) => {
+                    this.speed = parseFloat(e.target.value);
+                });
+                document.getElementById('windSpeed').addEventListener('input', (e) => {
+                    this.windSpeed = parseFloat(e.target.value);
+                });
+                document.getElementById('windDirection').addEventListener('input', (e) => {
+                    this.windDirection = parseFloat(e.target.value);
+                });
+                document.getElementById('temperature').addEventListener('input', (e) => {
+                    this.temperature = parseFloat(e.target.value);
+                    // Re-initialize temperature grid with new base temperature
+                    for (let i = 0; i < this.rows; i++) {
+                        for (let j = 0; j < this.cols; j++) {
+                            this.temperature_grid[i][j] = this.temperature + (Math.random() - 0.5) * 5;
+                        }
+                    }
+                });
+                document.getElementById('salinity').addEventListener('input', (e) => {
+                    this.salinity = parseFloat(e.target.value);
+                    // Re-initialize salinity grid with new base salinity
+                    for (let i = 0; i < this.rows; i++) {
+                        for (let j = 0; j < this.cols; j++) {
+                            this.salinity_grid[i][j] = this.salinity + (Math.random() - 0.5) * 2;
+                        }
+                    }
+                });
+
+                // Visualization mode buttons
+                document.getElementById('currentMode').addEventListener('click', (e) => {
+                    this.visualizationMode = 'current';
+                    e.target.classList.add('active');
+                    document.getElementById('temperatureMode').classList.remove('active');
+                    document.getElementById('salinityMode').classList.remove('active');
+                });
+                document.getElementById('temperatureMode').addEventListener('click', (e) => {
+                    this.visualizationMode = 'temperature';
+                    e.target.classList.add('active');
+                    document.getElementById('currentMode').classList.remove('active');
+                    document.getElementById('salinityMode').classList.remove('active');
+                });
+                document.getElementById('salinityMode').addEventListener('click', (e) => {
+                    this.visualizationMode = 'salinity';
+                    e.target.classList.add('active');
+                    document.getElementById('currentMode').classList.remove('active');
+                    document.getElementById('temperatureMode').classList.remove('active');
+                });
+
+                // Checkbox toggles
+                document.getElementById('showParticles').addEventListener('change', (e) => {
+                    this.showParticles = e.target.checked;
+                });
+                document.getElementById('showVectors').addEventListener('change', (e) => {
+                    this.showVectors = e.target.checked;
+                });
+
+                // Particle count slider
+                document.getElementById('particleCount').addEventListener('input', (e) => {
+                    this.particleCount = parseInt(e.target.value);
+                    this.initializeParticles(); // Re-initialize particles with new count
+                });
+
+                // Climate Change Effects listeners
+                document.getElementById('globalTempRise').addEventListener('input', (e) => {
+                    this.globalTempRise = parseFloat(e.target.value);
+                    // Randomly add a flood indicator when temp rise is high
+                    if (this.showClimateEffects && this.globalTempRise > 1.5 && Math.random() < 0.01) {
+                         this.addClimateIndicator(Math.random() * this.width, this.height * (0.8 + Math.random() * 0.2), 'flood');
+                    }
+                });
+                document.getElementById('seaLevelRise').addEventListener('input', (e) => {
+                    this.seaLevelRise = parseFloat(e.target.value);
+                });
+                document.getElementById('iceMeltRate').addEventListener('input', (e) => {
+                    this.iceMeltRate = parseFloat(e.target.value);
+                    // Randomly add an ice melt indicator near poles
+                    if (this.showClimateEffects && this.iceMeltRate > 50 && Math.random() < 0.005) {
+                        const x = this.width * (0.4 + Math.random() * 0.2);
+                        const y = Math.random() < 0.5 ? this.height * 0.1 : this.height * 0.9;
+                        this.addClimateIndicator(x, y, 'ice-melt');
+                    }
+                });
+                document.getElementById('showClimateEffects').addEventListener('change', (e) => {
+                    this.showClimateEffects = e.target.checked;
+                    if (!this.showClimateEffects) {
+                        this.climateIndicators.forEach(indicator => indicator.element.remove());
+                        this.climateIndicators = [];
+                    }
+                });
+
+                // Weather Patterns listeners
+                document.getElementById('stormIntensity').addEventListener('input', (e) => {
+                    this.stormIntensity = parseFloat(e.target.value);
+                });
+                document.getElementById('extremeWeatherFreq').addEventListener('input', (e) => {
+                    this.extremeWeatherFreq = parseFloat(e.target.value);
+                });
+
+                // Mouse interaction for adding currents on canvas
+                this.canvas.addEventListener('mousedown', (e) => {
+                    this.isMouseDown = true;
+                    this.lastMouseX = e.offsetX;
+                    this.lastMouseY = e.offsetY;
+                });
+
+                this.canvas.addEventListener('mousemove', (e) => {
+                    if (this.isMouseDown) {
+                        this.mouseX = e.offsetX;
+                        this.mouseY = e.offsetY;
+                        // Add force based on mouse movement
+                        const gridX = Math.floor(this.mouseX / this.gridSize);
+                        const gridY = Math.floor(this.mouseY / this.gridSize);
+                        const prevGridX = Math.floor(this.lastMouseX / this.gridSize);
+                        const prevGridY = Math.floor(this.lastMouseY / this.gridSize);
+
+                        if (gridX >= 0 && gridX < this.cols && gridY >= 0 && gridY < this.rows &&
+                            prevGridX >= 0 && prevGridX < this.cols && prevGridY >= 0 && prevGridY < this.rows) {
+                            const dx = (this.mouseX - this.lastMouseX) * 0.1;
+                            const dy = (this.mouseY - this.lastMouseY) * 0.1;
+
+                            this.velocityX[gridY][gridX] += dx;
+                            this.velocityY[gridY][gridX] += dy;
+                        }
+
+                        this.lastMouseX = this.mouseX;
+                        this.lastMouseY = this.mouseY;
+                    }
+                });
+
+                this.canvas.addEventListener('mouseup', () => {
+                    this.isMouseDown = false;
+                });
+
+                this.canvas.addEventListener('mouseleave', () => {
+                    this.isMouseDown = false;
+                });
+
+                // Close info popup button
+                this.closePopupBtn.addEventListener('click', () => {
+                    this.infoPopup.style.display = 'none';
+                });
+            }
+
+            /**
+             * Sets up the info buttons on the Leaflet map using custom DivIcons.
+             * Each button, when clicked, displays a popup with specific information.
+             */
+            setupInfoButtons() {
+                this.infoPoints.forEach((point, index) => {
+                    // Create a custom DivIcon for the info button
+                    const infoIcon = L.divIcon({
+                        className: 'info-button-icon', // Use the CSS class defined earlier
+                        html: 'i', // The text inside the button
+                        iconSize: [25, 25], // Size of the icon
+                        iconAnchor: [12.5, 12.5] // Anchor point (center of the icon)
+                    });
+
+                    // Create a marker on the map at the specified LatLng
+                    const marker = L.marker([point.lat, point.lng], { icon: infoIcon }).addTo(this.map);
+
+                    // Add a click listener to the marker
+                    marker.on('click', (e) => {
+                        // Get the screen coordinates (pixel position) of the clicked marker
+                        const screenPoint = this.map.latLngToContainerPoint(e.latlng);
+
+                        // Populate the global info popup with content
+                        this.popupTitle.innerHTML = point.title;
+                        this.popupContent.innerHTML = point.content;
+
+                        // Position the info popup relative to the clicked marker's screen position
+                        // Adjust translation for popup to appear above and centered on the marker
+                        this.infoPopup.style.left = `${screenPoint.x}px`;
+                        this.infoPopup.style.top = `${screenPoint.y}px`;
+                        this.infoPopup.style.display = 'block'; // Show the popup
+                    });
+                });
+            }
+        }
+
+        // Initialize the simulation when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new OceanCurrentSimulation();
+        });
+    </script>
+</body>
+</html>
+
+
