@@ -14,6 +14,10 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100%; /* Ensure html and body take full height */
+        }
+
         body {
             font-family: 'Inter', sans-serif; /* Using Inter font as per instructions */
             background: linear-gradient(135deg, #0c4a6e 0%, #164e63 100%);
@@ -400,14 +404,14 @@
                 </div>
                 <div class="control-item">
                     <label>
-                        <input type="checkbox" id="showVectors" checked>
+                        <input type="checkbox" id="showVectors">
                         Show Velocity Vectors
                     </label>
                 </div>
                 <div class="control-item">
                     <label>Particle Count</label>
-                    <input type="range" id="particleCount" min="100" max="10000" value="5000" step="100">
-                    <div class="value-display">Particles: <span id="particleCountValue">5000</span></div>
+                    <input type="range" id="particleCount" min="100" max="10000" value="10000" step="100">
+                    <div class="value-display">Particles: <span id="particleCountValue">10000</span></div>
                 </div>
             </div>
 
@@ -456,6 +460,22 @@
                   <div class="value-display">Events/year: <span id="extremeWeatherFreqValue">5</span></div>
               </div>
           </div>
+
+          <div class="control-group">
+            <h3>⏳ Timeline & Scenarios</h3>
+            <div class="control-item">
+                <label>Current Year: <span id="currentYearValue">2024</span></label>
+                <input type="range" id="yearSlider" min="2024" max="2100" value="2024" step="1">
+            </div>
+            <div class="control-item">
+                <button id="scenarioBusinessAsUsual">Business as Usual</button>
+                <button id="scenarioParisAgreement">Paris Agreement</button>
+                <button id="scenarioNetZero">Net Zero</button>
+            </div>
+            <div class="control-item">
+                <p style="font-size: 12px; color: #cbd5e1;">Scenario: <span id="activeScenarioText">Current Settings</span></p>
+            </div>
+          </div>
         </div>
 
         <div class="simulation-area">
@@ -465,6 +485,9 @@
             <!-- Canvas for particle and vector simulation -->
             <canvas id="simulationCanvas"></canvas>
             
+            <!-- Hidden canvas for landmass detection -->
+            <canvas id="landMaskCanvas" style="display: none;"></canvas>
+
             <!-- Single reusable Info Popup element, positioned by JS -->
             <div class="info-popup" id="global-info-popup">
                 <button class="close-btn">&times;</button>
@@ -487,7 +510,7 @@
                     <span>Warm Water (&gt;20°C)</span>
                 </div>
                 <p><strong>Mode:</strong> <span id="currentMode-text">Current Flow</span></p>
-                <p><strong>Active Particles:</strong> <span id="particleCount-text">5000</span></p>
+                <p><strong>Active Particles:</strong> <span id="particleCount-text">10000</span></p>
             </div>
 
             <div class="stats">
@@ -512,18 +535,18 @@
                 
                 // Simulation parameters
                 this.gridSize = 16;
-                this.damping = 0.99;
+                this.damping = 0.98; // Slightly more damping for stability
                 this.viscosity = 0.0001;
                 this.dt = 0.016; // Fixed timestep for consistent simulation speed
                 
-                // Environmental parameters
+                // Environmental parameters (initial values, will be overridden by timeline/scenario)
                 this.windSpeed = 15;
                 this.windDirection = 45; // Degrees
-                this.temperature = 20; // Initial average temperature
-                this.salinity = 35; // Initial average salinity (ppt)
+                this.temperature = 20; // Initial average temperature for grid init
+                this.salinity = 35; // Initial average salinity for grid init
                 this.speed = 1; // Simulation speed multiplier
                 
-                // Climate change parameters
+                // Climate change parameters (dynamic based on timeline/scenario)
                 this.globalTempRise = 1.5; // Global temperature increase in °C
                 this.seaLevelRise = 0.2; // Sea level rise in meters
                 this.iceMeltRate = 30; // Percentage of ice sheet melting
@@ -539,8 +562,8 @@
                 // Visualization mode
                 this.visualizationMode = 'current'; // 'current', 'temperature', or 'salinity'
                 this.showParticles = true;
-                this.showVectors = true;
-                this.particleCount = 5000; // Increased particle count for denser flow
+                this.showVectors = false; // Vectors are less like the reference image, default off
+                this.particleCount = 10000; // Increased particle count for denser flow
                 
                 // Mouse interaction for drawing currents
                 this.mouseX = 0;
@@ -549,29 +572,60 @@
                 this.lastMouseX = 0;
                 this.lastMouseY = 0;
 
+                // Landmass detection
+                this.landMaskCanvas = document.getElementById('landMaskCanvas');
+                this.landMaskCtx = this.landMaskCanvas.getContext('2d', { willReadFrequently: true });
+                this.landMaskData = null; // To store pixel data for land detection
+
                 // Info popup elements
                 this.infoPopup = document.getElementById('global-info-popup');
                 this.popupTitle = document.getElementById('popup-title');
                 this.popupContent = document.getElementById('popup-content');
                 this.closePopupBtn = this.infoPopup.querySelector('.close-btn');
 
+                // Timeline and Scenarios
+                this.currentYear = 2024;
+                this.startYear = 2024;
+                this.endYear = 2100;
+                this.activeScenario = 'current'; // 'current', 'businessAsUsual', 'parisAgreement', 'netZero'
+                this.scenarioTargets = {
+                    'current': { tempRise: 1.5, seaLevel: 0.2, iceMelt: 30, stormIntensity: 3, extremeFreq: 5 },
+                    'businessAsUsual': { tempRise: 4.0, seaLevel: 1.0, iceMelt: 80, stormIntensity: 8, extremeFreq: 15 },
+                    'parisAgreement': { tempRise: 1.5, seaLevel: 0.3, iceMelt: 20, stormIntensity: 4, extremeFreq: 7 },
+                    'netZero': { tempRise: 0.8, seaLevel: 0.1, iceMelt: 10, stormIntensity: 2, extremeFreq: 3 }
+                };
+                // Store initial values to interpolate from
+                this.initialClimateParams = { ...this.scenarioTargets['current'] };
+
                 // Define info points with LatLng coordinates and content
                 this.infoPoints = [
-                    { lat: 35, lng: -70, title: '🌊 Gulf Stream (North Atlantic)', content: 'The Gulf Stream is weakening by 15% due to Arctic ice melt disrupting the Atlantic Meridional Overturning Circulation (AMOC). <strong>Local Impact:</strong> Cooler winters in Europe, sea level rise along US East Coast, changes in fish migration patterns.' },
-                    { lat: 75, lng: -40, title: '🧊 Arctic Ocean (Greenland)', content: 'Greenland ice sheet losing 280 billion tons of ice annually, adding freshwater that disrupts density-driven ocean currents. <strong>Local Impact:</strong> Accelerated Arctic warming, polar bear habitat loss, disrupted weather patterns across Northern Hemisphere.' },
-                    { lat: 15, lng: -100, title: '🌀 Eastern Pacific Hurricane Zone', content: 'Warmer Pacific waters are intensifying hurricanes. Each 1°C increase can strengthen storms by 5-10% with higher wind speeds. <strong>Local Impact:</strong> More Category 4-5 hurricanes, coastal flooding in Mexico and Central America, disrupted marine ecosystems.' },
-                    { lat: 0, lng: 80, title: '🌊 Indian Ocean Dipole', content: 'Climate change is making the Indian Ocean Dipole more extreme, affecting monsoon patterns and ocean temperatures. <strong>Local Impact:</strong> Irregular monsoons affecting 1.5 billion people, coral bleaching, changes in tuna migration routes.' },
-                    { lat: -60, lng: 0, title: '🧊 Antarctic Circumpolar Current', content: 'The world\'s strongest ocean current is warming and changing flow patterns as Antarctic ice shelves melt faster than ever. <strong>Local Impact:</strong> Global sea level rise, changes in global ocean circulation, penguin population decline.' },
-                    { lat: 30, lng: 140, title: '🌊 Kuroshio Current (Japan)', content: 'Japan\'s "Black Current" is shifting northward due to warming, affecting regional climate and marine biodiversity. <strong>Local Impact:</strong> Changes in Japanese seasonal patterns, fish species migration, increased typhoon intensity.' }
+                    { lat: 35, lng: -70, title: '🌊 Gulf Stream (North Atlantic)', content: 'The Gulf Stream is a powerful, warm, and swift Atlantic ocean current that originates in the Gulf of Mexico and stretches to the North Atlantic. Climate change is causing it to weaken, potentially leading to cooler winters in Europe, sea level rise along US East Coast, and changes in fish migration patterns.' },
+                    { lat: 75, lng: -40, title: '🧊 Arctic Ocean (Greenland)', content: 'The Greenland ice sheet is losing hundreds of billions of tons of ice annually. This freshwater influx into the North Atlantic disrupts the density-driven Atlantic Meridional Overturning Circulation (AMOC), impacting global currents. <strong>Local Impact:</strong> Accelerated Arctic warming, polar bear habitat loss, disrupted weather patterns across Northern Hemisphere.' },
+                    { lat: 15, lng: -100, title: '🌀 Eastern Pacific Hurricane Zone', content: 'Warmer Pacific waters intensify hurricanes. Each 1°C increase can strengthen storms by 5-10% with higher wind speeds and more rainfall. <strong>Local Impact:</strong> More frequent and intense Category 4-5 hurricanes, increased coastal flooding in Mexico and Central America, and disrupted marine ecosystems.' },
+                    { lat: 0, lng: 80, title: '🌊 Indian Ocean Dipole', content: 'Climate change is making the Indian Ocean Dipole (IOD) more extreme. A positive IOD brings drier conditions to Australia and heavy rainfall to East Africa, while a negative IOD reverses these patterns. More extreme events affect monsoon patterns and ocean temperatures. <strong>Local Impact:</strong> Irregular monsoons affecting 1.5 billion people, severe coral bleaching, and changes in tuna migration routes.' },
+                    { lat: -60, lng: 0, title: '🧊 Antarctic Circumpolar Current', content: 'The world\'s strongest ocean current, the ACC, is warming and changing flow patterns as Antarctic ice shelves melt faster. This current connects all major oceans and plays a crucial role in global heat distribution. <strong>Local Impact:</strong> Accelerated global sea level rise, significant changes in global ocean circulation, and decline in penguin populations due to altered food sources.' },
+                    { lat: 30, lng: 140, title: '🌊 Kuroshio Current (Japan)', content: 'Japan\'s "Black Current" is a strong western boundary current in the North Pacific. Due to warming, it is shifting northward, affecting regional climate and marine biodiversity. <strong>Local Impact:</strong> Changes in Japanese seasonal patterns, shifts in fish species migration, and potentially increased typhoon intensity affecting coastal regions.' }
                 ];
                 
                 this.setupMap(); // Initialize Leaflet map
-                this.setupCanvas(); // Setup and resize canvas
-                this.initializeGrid(); // Initialize fluid simulation grid
-                this.initializeParticles(); // Initialize particles for visualization
-                this.setupEventListeners(); // Set up all UI event listeners
-                this.setupInfoButtons(); // Set up the Leaflet-based info buttons
-                this.animate(); // Start the animation loop
+                this.loadMapImageForMask().then(() => { // Load map image for land detection before setting up canvas
+                    this.setupCanvas(); // Setup and resize canvas
+                    this.initializeGrid(); // Initialize fluid simulation grid
+                    this.initializeParticles(); // Initialize particles for visualization
+                    this.setupEventListeners(); // Set up all UI event listeners
+                    this.setupInfoButtons(); // Set up the Leaflet-based info buttons
+                    this.animate(); // Start the animation loop
+                }).catch(error => {
+                    console.error("Failed to load map image for mask:", error);
+                    // Fallback: run simulation without landmass detection if image fails to load
+                    this.landMaskData = null; // Ensure land detection is off
+                    this.setupCanvas();
+                    this.initializeGrid();
+                    this.initializeParticles();
+                    this.setupEventListeners();
+                    this.setupInfoButtons();
+                    this.animate();
+                });
             }
 
             /**
@@ -589,16 +643,16 @@
                 });
 
                 // URL for a blank world map image
-                const imageUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/1000px-World_map_blank_without_borders.svg.png';
+                this.mapImageUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/1000px-World_map_blank_without_borders.svg.png';
                 // Define the bounds for the image overlay (approximate for a 1000x500 map)
                 // [south-west corner, north-east corner] in Leaflet's simple CRS coordinates
-                const imageBounds = [[-250, -500], [250, 500]]; // Adjusted to center a 1000x500 image, assuming 0,0 is center
+                this.imageBounds = [[-250, -500], [250, 500]]; // Adjusted to center a 1000x500 image, assuming 0,0 is center
 
                 // Create and add the image overlay to the map
-                L.imageOverlay(imageUrl, imageBounds).addTo(this.map);
+                L.imageOverlay(this.mapImageUrl, this.imageBounds).addTo(this.map);
 
                 // Set the map view to fit the image bounds
-                this.map.fitBounds(imageBounds);
+                this.map.fitBounds(this.imageBounds);
 
                 // Disable all map interactions (panning, zooming, etc.)
                 this.map.dragging.disable();
@@ -608,6 +662,86 @@
                 this.map.boxZoom.disable();
                 this.map.keyboard.disable();
                 if (this.map.tap) this.map.tap.disable(); // Disable tap on mobile devices
+            }
+
+            /**
+             * Loads the world map image onto a hidden canvas to create a landmass mask.
+             * This allows for pixel-level detection of land vs. water.
+             * @returns {Promise<void>} A promise that resolves when the image is loaded and drawn.
+             */
+            loadMapImageForMask() {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = 'Anonymous'; // Required for getImageData on external images
+                    img.src = this.mapImageUrl;
+
+                    img.onload = () => {
+                        this.landMaskCanvas.width = img.width;
+                        this.landMaskCanvas.height = img.height;
+                        this.landMaskCtx.drawImage(img, 0, 0);
+                        try {
+                            // Get pixel data from the drawn image
+                            this.landMaskData = this.landMaskCtx.getImageData(0, 0, img.width, img.height);
+                            console.log("Map image loaded for landmasking.");
+                            resolve();
+                        } catch (e) {
+                            console.error("Error getting image data (might be CORS issue):", e);
+                            this.landMaskData = null; // Disable land detection if data can't be read
+                            resolve(); // Resolve anyway to allow simulation to run
+                        }
+                    };
+                    img.onerror = (e) => {
+                        console.error("Failed to load map image for landmask:", e);
+                        this.landMaskData = null; // Disable land detection on error
+                        reject(e);
+                    };
+                });
+            }
+
+            /**
+             * Checks if a given canvas coordinate (x, y) is over a landmass.
+             * It uses the pixel data from the hidden landMaskCanvas.
+             * @param {number} x - X coordinate on the canvas.
+             * @param {number} y - Y coordinate on the canvas.
+             * @returns {boolean} True if the coordinate is over land, false otherwise.
+             */
+            isLand(x, y) {
+                if (!this.landMaskData || x < 0 || y < 0 || x >= this.width || y >= this.height) {
+                    return false; // Cannot determine if out of bounds or no mask data
+                }
+
+                // Convert canvas coordinates to mask image coordinates
+                // The map image is scaled and positioned by Leaflet. We need to map canvas pixels
+                // back to the original image pixels.
+                const mapPixelBounds = this.map.getPixelBounds();
+                const mapSize = mapPixelBounds.getSize();
+                
+                // Calculate scale factors
+                const scaleX = this.landMaskCanvas.width / mapSize.x;
+                const scaleY = this.landMaskCanvas.height / mapSize.y;
+
+                // Adjust for the map's origin (top-left pixel of the map image on screen)
+                const mapOriginX = this.map.getPixelOrigin().x;
+                const mapOriginY = this.map.getPixelOrigin().y;
+
+                const imgX = (x - mapOriginX) * scaleX;
+                const imgY = (y - mapOriginY) * scaleY;
+
+                if (imgX < 0 || imgY < 0 || imgX >= this.landMaskCanvas.width || imgY >= this.landMaskCanvas.height) {
+                    return false; // Outside the bounds of the map image itself
+                }
+
+                const pixelIndex = (Math.floor(imgY) * this.landMaskData.width + Math.floor(imgX)) * 4;
+                const r = this.landMaskData.data[pixelIndex];
+                const g = this.landMaskData.data[pixelIndex + 1];
+                const b = this.landMaskData.data[pixelIndex + 2];
+
+                // Heuristic to detect land: The blank world map SVG has a very dark blue/black ocean
+                // and distinct greenish/greyish landmasses.
+                // Assuming land is not dark blue/black (common ocean color).
+                // This check looks for colors that are NOT very dark blue/black.
+                // Values below 30 for R, G, B are likely deep ocean.
+                return !(r < 30 && g < 30 && b < 30); // If not very dark, assume it's land or border
             }
             
             /**
@@ -663,11 +797,48 @@
                     }
                 }
                 
-                // Add some initial current patterns (gyres) - increased strength
-                this.addGyre(this.cols * 0.3, this.rows * 0.3, 1.0); // Counter-clockwise gyre
-                this.addGyre(this.cols * 0.7, this.rows * 0.7, -0.6); // Clockwise gyre
+                // Add some initial global current patterns (simplified)
+                this.addGlobalCurrents();
             }
             
+            /**
+             * Adds initial global current patterns to the fluid grid, simulating major ocean currents.
+             * This includes simplified gyres, equatorial currents, and polar flows.
+             */
+            addGlobalCurrents() {
+                // North Atlantic Gyre / Gulf Stream approximation
+                this.addGyre(this.cols * 0.25, this.rows * 0.3, 1.5); // Strong clockwise
+                this.addGyre(this.cols * 0.4, this.rows * 0.2, -1.0); // Smaller counter-clockwise
+
+                // North Pacific Gyre / Kuroshio approximation
+                this.addGyre(this.cols * 0.75, this.rows * 0.3, 1.5); // Strong clockwise
+                this.addGyre(this.cols * 0.6, this.rows * 0.2, -1.0); // Smaller counter-clockwise
+
+                // South Atlantic Gyre
+                this.addGyre(this.cols * 0.3, this.rows * 0.7, -1.2); // Counter-clockwise
+
+                // South Pacific Gyre
+                this.addGyre(this.cols * 0.7, this.rows * 0.7, -1.2); // Counter-clockwise
+
+                // Indian Ocean Gyre
+                this.addGyre(this.cols * 0.55, this.rows * 0.6, 1.0); // Clockwise
+
+                // Equatorial Currents (Westward flow near equator)
+                for (let j = 0; j < this.cols; j++) {
+                    const equatorRow = Math.floor(this.rows / 2);
+                    this.velocityX[equatorRow][j] -= 0.1; // Westward
+                    this.velocityX[equatorRow + 1][j] -= 0.1;
+                    this.velocityX[equatorRow - 1][j] -= 0.1;
+                }
+
+                // Antarctic Circumpolar Current (Strong eastward flow in Southern Ocean)
+                for (let i = Math.floor(this.rows * 0.8); i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        this.velocityX[i][j] += 0.2; // Eastward
+                    }
+                }
+            }
+
             /**
              * Adds a circular current (gyre) to the velocity field.
              * @param {number} centerX - X coordinate of the gyre center in grid units.
@@ -675,7 +846,7 @@
              * @param {number} strength - Strength and direction of the gyre.
              */
             addGyre(centerX, centerY, strength) {
-                const radius = 80; // Radius of the gyre influence
+                const radius = 100; // Increased radius of influence
                 for (let i = 0; i < this.rows; i++) {
                     for (let j = 0; j < this.cols; j++) {
                         const dx = j - centerX;
@@ -697,13 +868,19 @@
             initializeParticles() {
                 this.particles = [];
                 for (let i = 0; i < this.particleCount; i++) {
+                    let x, y;
+                    do { // Spawn particles only in ocean areas
+                        x = Math.random() * this.width;
+                        y = Math.random() * this.height;
+                    } while (this.isLand(x, y)); // Keep trying until an ocean coordinate is found
+                    
                     this.particles.push({
-                        x: Math.random() * this.width, // Random initial X position
-                        y: Math.random() * this.height, // Random initial Y position
+                        x: x,
+                        y: y,
                         vx: 0, // Velocity X
                         vy: 0, // Velocity Y
-                        life: Math.random() * 100 + 100, // Increased initial life for longer trails
-                        maxLife: 200, // Increased maximum life for longer trails
+                        life: Math.random() * 150 + 150, // Increased initial life for longer trails
+                        maxLife: 300, // Increased maximum life for longer trails
                         size: Math.random() * 0.8 + 0.2 // Smaller particle size for denser look
                     });
                 }
@@ -729,58 +906,122 @@
                         particle.vy = vy * 50 + (Math.random() - 0.5) * 0.5;
                         
                         // Update particle position based on its velocity and simulation speed
-                        particle.x += particle.vx * this.dt * this.speed;
-                        particle.y += particle.vy * this.dt * this.speed;
-                        
-                        // Wrap-around boundary conditions for particles
-                        if (particle.x < 0) particle.x = this.width;
-                        if (particle.x > this.width) particle.x = 0;
-                        if (particle.y < 0) particle.y = this.height;
-                        if (particle.y > this.height) particle.y = 0;
+                        let newX = particle.x + particle.vx * this.dt * this.speed;
+                        let newY = particle.y + particle.vy * this.dt * this.speed;
+
+                        // Landmass collision detection for particles
+                        if (this.isLand(newX, newY)) {
+                            // If particle hits land, respawn it in a random ocean location
+                            do {
+                                newX = Math.random() * this.width;
+                                newY = Math.random() * this.height;
+                            } while (this.isLand(newX, newY));
+                            particle.x = newX;
+                            particle.y = newY;
+                            particle.life = particle.maxLife; // Reset life on respawn
+                            particle.vx = 0; // Reset velocity
+                            particle.vy = 0;
+                        } else {
+                            // Apply wrap-around boundary conditions for particles if not hitting land
+                            if (newX < 0) newX = this.width;
+                            if (newX > this.width) newX = 0;
+                            if (newY < 0) newY = this.height;
+                            if (newY > this.height) newY = 0;
+
+                            particle.x = newX;
+                            particle.y = newY;
+                        }
                         
                         // Decrease particle life and respawn if life runs out
                         particle.life--;
                         if (particle.life <= 0) {
-                            particle.x = Math.random() * this.width;
-                            particle.y = Math.random() * this.height;
+                            do { // Respawn only in ocean areas
+                                particle.x = Math.random() * this.width;
+                                particle.y = Math.random() * this.height;
+                            } while (this.isLand(particle.x, particle.y));
                             particle.life = particle.maxLife;
+                            particle.vx = 0;
+                            particle.vy = 0;
                         }
                     } else {
-                        // If particle goes out of bounds (e.g., due to initial random placement), respawn it
-                        particle.x = Math.random() * this.width;
-                        particle.y = Math.random() * this.height;
+                        // If particle goes out of bounds (e.g., due to initial random placement), respawn it in ocean
+                        do {
+                            particle.x = Math.random() * this.width;
+                            particle.y = Math.random() * this.height;
+                        } while (this.isLand(particle.x, particle.y));
                         particle.life = particle.maxLife;
+                        particle.vx = 0;
+                        particle.vy = 0;
                     }
                 }
             }
             
             /**
+             * Interpolates a value between a start and end point based on a progress.
+             * @param {number} start - The starting value.
+             * @param {number} end - The ending value.
+             * @param {number} progress - The interpolation progress (0 to 1).
+             * @returns {number} The interpolated value.
+             */
+            lerp(start, end, progress) {
+                return start + (end - start) * progress;
+            }
+
+            /**
              * Updates the fluid velocity field based on external forces (wind, temperature, salinity),
              * mouse interaction, and applies damping and pressure projection.
              */
             updateFluidDynamics() {
+                // Interpolate climate parameters based on current year and active scenario
+                const progress = (this.currentYear - this.startYear) / (this.endYear - this.startYear);
+                const targetScenario = this.scenarioTargets[this.activeScenario];
+
+                this.globalTempRise = this.lerp(this.initialClimateParams.tempRise, targetScenario.tempRise, progress);
+                this.seaLevelRise = this.lerp(this.initialClimateParams.seaLevel, targetScenario.seaLevel, progress);
+                this.iceMeltRate = this.lerp(this.initialClimateParams.iceMelt, targetScenario.iceMelt, progress);
+                this.stormIntensity = this.lerp(this.initialClimateParams.stormIntensity, targetScenario.stormIntensity, progress);
+                this.extremeWeatherFreq = this.lerp(this.initialClimateParams.extremeFreq, targetScenario.extremeFreq, progress);
+
+
                 // Apply wind force uniformly across the grid
-                const windForceX = Math.cos(this.windDirection * Math.PI / 180) * this.windSpeed * 0.001;
-                const windForceY = Math.sin(this.windDirection * Math.PI / 180) * this.windSpeed * 0.001;
+                const windForceX = Math.cos(this.windDirection * Math.PI / 180) * this.windSpeed * 0.005; // Amplified wind effect
+                const windForceY = Math.sin(this.windDirection * Math.PI / 180) * this.windSpeed * 0.005;
                 
                 for (let i = 1; i < this.rows - 1; i++) {
                     for (let j = 1; j < this.cols - 1; j++) {
-                        this.velocityX[i][j] += windForceX * this.dt;
-                        this.velocityY[i][j] += windForceY * this.dt;
-                        
-                        // Apply thermal and salinity effects (simplified thermohaline circulation)
-                        // Adjust temperature and salinity based on global climate parameters
-                        const adjustedTemperature = this.temperature_grid[i][j] + this.globalTempRise;
-                        // Salinity decreases with ice melt, affecting density-driven currents
-                        const adjustedSalinity = this.salinity_grid[i][j] - (this.iceMeltRate / 100) * 5; 
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
 
-                        // Temperature effect: warmer water tends to rise (negative Y velocity)
-                        const tempEffect = (adjustedTemperature - 20) * 0.0001 * this.thermohalineStrength;
-                        // Salinity effect: less saline water tends to rise (negative Y velocity)
-                        const salinityEffect = (adjustedSalinity - 35) * 0.0001 * this.thermohalineStrength;
-                        
-                        this.velocityY[i][j] += tempEffect * this.dt;
-                        this.velocityX[i][j] += salinityEffect * this.dt;
+                        // Only apply forces if the cell is over water
+                        if (!this.isLand(cellX, cellY)) {
+                            this.velocityX[i][j] += windForceX * this.dt;
+                            this.velocityY[i][j] += windForceY * this.dt;
+                            
+                            // Apply thermal and salinity effects (simplified thermohaline circulation)
+                            // The actual grid temperature/salinity values are influenced by initial settings + advection
+                            // The 'adjusted' values represent the global climate state impacting deep currents
+                            const effectiveTemperature = this.temperature + this.globalTempRise;
+                            const effectiveSalinity = this.salinity - (this.iceMeltRate / 100) * 10; // More dramatic salinity drop with ice melt
+
+                            // The thermohaline circulation strength scales the effect of temp/salinity differences
+                            // Warmer water tends to rise (negative Y velocity in this coordinate system)
+                            const tempEffect = (this.temperature_grid[i][j] - effectiveTemperature) * 0.0005 * this.thermohalineStrength; // Amplified
+                            // Less saline water tends to rise (negative Y velocity)
+                            const salinityEffect = (this.salinity_grid[i][j] - effectiveSalinity) * 0.0005 * this.thermohalineStrength; // Amplified
+                            
+                            this.velocityY[i][j] += tempEffect * this.dt;
+                            this.velocityX[i][j] += salinityEffect * this.dt;
+
+                            // Simplified Coriolis Effect (deflection based on latitude/Y position)
+                            const coriolisStrength = 0.0003; // Further amplified Coriolis strength
+                            const latitudeFactor = (i - this.rows / 2) / (this.rows / 2); // -1 at top, 1 at bottom
+                            this.velocityX[i][j] += this.velocityY[i][j] * coriolisStrength * latitudeFactor * this.dt;
+                            this.velocityY[i][j] -= this.velocityX[i][j] * coriolisStrength * latitudeFactor * this.dt;
+                        } else {
+                            // If it's land, set velocity to zero
+                            this.velocityX[i][j] = 0;
+                            this.velocityY[i][j] = 0;
+                        }
                     }
                 }
                 
@@ -798,26 +1039,36 @@
                             const gridY = mouseGridY + i;
                             
                             if (gridX >= 0 && gridX < this.cols && gridY >= 0 && gridY < this.rows) {
-                                const distance = Math.sqrt(i * i + j * j);
-                                if (distance <= radius) {
-                                    const strength = (1 - distance / radius) * 0.5; // Strength decreases with distance
-                                    this.velocityX[gridY][gridX] += forceX * strength;
-                                    this.velocityY[gridY][gridX] += forceY * strength;
+                                const cellX = gridX * this.gridSize;
+                                const cellY = gridY * this.gridSize;
+                                if (!this.isLand(cellX, cellY)) { // Only apply force if over water
+                                    const distance = Math.sqrt(i * i + j * j);
+                                    if (distance <= radius) {
+                                        const strength = (1 - distance / radius) * 0.5; // Strength decreases with distance
+                                        this.velocityX[gridY][gridX] += forceX * strength;
+                                        this.velocityY[gridY][gridX] += forceY * strength;
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 
-                // Apply damping to gradually reduce velocity
+                // Apply damping and advect scalars
                 for (let i = 0; i < this.rows; i++) {
                     for (let j = 0; j < this.cols; j++) {
-                        this.velocityX[i][j] *= this.damping;
-                        this.velocityY[i][j] *= this.damping;
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
+                        if (!this.isLand(cellX, cellY)) { // Only apply damping and advect if over water
+                            this.velocityX[i][j] *= this.damping;
+                            this.velocityY[i][j] *= this.damping;
 
-                        // Advect (move) temperature and salinity values with the fluid flow
-                        this.temperature_grid[i][j] = this.advectScalar(this.temperature_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
-                        this.salinity_grid[i][j] = this.advectScalar(this.salinity_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
+                            this.temperature_grid[i][j] = this.advectScalar(this.temperature_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
+                            this.salinity_grid[i][j] = this.advectScalar(this.salinity_grid, i, j, this.velocityX[i][j], this.velocityY[i][j]);
+                        } else {
+                            this.velocityX[i][j] = 0;
+                            this.velocityY[i][j] = 0;
+                        }
                     }
                 }
 
@@ -825,19 +1076,33 @@
                 this.project();
 
                 // Calculate thermohaline circulation strength based on climate parameters
+                // Higher global temp rise or ice melt rate weakens thermohaline circulation
                 const baseThermohalineStrength = 1.0;
-                const tempWeakening = (this.globalTempRise / 5) * 0.5; // Up to 50% weakening for 5°C rise
-                const iceMeltWeakening = (this.iceMeltRate / 100) * 0.5; // Up to 50% weakening for 100% melt
-                this.thermohalineStrength = baseThermohalineStrength - tempWeakening - iceMeltWeakening;
+                const tempWeakeningFactor = (this.globalTempRise / 5) * 0.8; // Up to 80% weakening for 5°C rise
+                const iceMeltWeakeningFactor = (this.iceMeltRate / 100) * 0.8; // Up to 80% weakening for 100% melt
+                this.thermohalineStrength = baseThermohalineStrength - tempWeakeningFactor - iceMeltWeakeningFactor;
                 this.thermohalineStrength = Math.max(0, this.thermohalineStrength); // Cannot go below 0
 
                 // Randomly add storms based on extreme weather frequency
-                if (Math.random() < this.extremeWeatherFreq * 0.0001 * this.dt) {
-                    this.addStorm(this.stormIntensity);
+                // Only add storms over water
+                // Increased chance of storm appearance
+                if (Math.random() < this.extremeWeatherFreq * 0.0005 * this.dt) {
+                    let stormX, stormY;
+                    do {
+                        stormX = Math.random() * this.width;
+                        stormY = Math.random() * this.height;
+                    } while (this.isLand(stormX, stormY));
+                    this.addStorm(stormX, stormY, this.stormIntensity);
                 }
 
                 // Update storm positions and apply their effects
                 this.updateStorms();
+
+                // Trigger flood indicators based on sea level rise
+                if (this.showClimateEffects && this.seaLevelRise > 0.3 && Math.random() < this.seaLevelRise * 0.001) {
+                    // Randomly add flood indicators, more frequently with higher sea level rise
+                    this.addClimateIndicator(Math.random() * this.width, this.height * (0.8 + Math.random() * 0.2), 'flood');
+                }
 
                 // Update the climate warning text in the UI
                 this.updateClimateWarning();
@@ -878,11 +1143,18 @@
                 // Calculate divergence for each cell
                 for (let i = 1; i < this.rows - 1; i++) {
                     for (let j = 1; j < this.cols - 1; j++) {
-                        this.divergence[i][j] = -0.5 * (
-                            this.velocityX[i][j+1] - this.velocityX[i][j-1] + // Difference in X velocity
-                            this.velocityY[i+1][j] - this.velocityY[i-1][j]   // Difference in Y velocity
-                        ) / this.gridSize;
-                        this.pressure[i][j] = 0; // Reset pressure for iteration
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
+                        if (!this.isLand(cellX, cellY)) { // Only calculate divergence for water cells
+                            this.divergence[i][j] = -0.5 * (
+                                this.velocityX[i][j+1] - this.velocityX[i][j-1] + // Difference in X velocity
+                                this.velocityY[i+1][j] - this.velocityY[i-1][j]   // Difference in Y velocity
+                            ) / this.gridSize;
+                            this.pressure[i][j] = 0; // Reset pressure for iteration
+                        } else {
+                            this.divergence[i][j] = 0;
+                            this.pressure[i][j] = 0;
+                        }
                     }
                 }
 
@@ -891,11 +1163,15 @@
                 for (let k = 0; k < numIterations; k++) {
                     for (let i = 1; i < this.rows - 1; i++) {
                         for (let j = 1; j < this.cols - 1; j++) {
-                            this.pressure[i][j] = (
-                                this.divergence[i][j] +
-                                this.pressure[i][j+1] + this.pressure[i][j-1] +
-                                this.pressure[i+1][j] + this.pressure[i-1][j]
-                            ) / 4; // Average of neighbors plus divergence
+                            const cellX = j * this.gridSize;
+                            const cellY = i * this.gridSize;
+                            if (!this.isLand(cellX, cellY)) { // Only update pressure for water cells
+                                this.pressure[i][j] = (
+                                    this.divergence[i][j] +
+                                    this.pressure[i][j+1] + this.pressure[i][j-1] +
+                                    this.pressure[i+1][j] + this.pressure[i-1][j]
+                                ) / 4; // Average of neighbors plus divergence
+                            }
                         }
                     }
                 }
@@ -903,19 +1179,23 @@
                 // Subtract pressure gradient from velocity to make it divergence-free
                 for (let i = 1; i < this.rows - 1; i++) {
                     for (let j = 1; j < this.cols - 1; j++) {
-                        this.velocityX[i][j] -= 0.5 * (this.pressure[i][j+1] - this.pressure[i][j-1]) / this.gridSize;
-                        this.velocityY[i][j] -= 0.5 * (this.pressure[i+1][j] - this.pressure[i-1][j]) / this.gridSize;
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
+                        if (!this.isLand(cellX, cellY)) { // Only update velocity for water cells
+                            this.velocityX[i][j] -= 0.5 * (this.pressure[i][j+1] - this.pressure[i][j-1]) / this.gridSize;
+                            this.velocityY[i][j] -= 0.5 * (this.pressure[i+1][j] - this.pressure[i-1][j]) / this.gridSize;
+                        }
                     }
                 }
             }
 
             /**
              * Adds a new storm to the simulation at a random location.
+             * @param {number} x - X coordinate for the storm center.
+             * @param {number} y - Y coordinate for the storm center.
              * @param {number} intensity - The intensity of the storm.
              */
-            addStorm(intensity) {
-                const x = Math.random() * this.width;
-                const y = Math.random() * this.height;
+            addStorm(x, y, intensity) {
                 const radius = (intensity / 10) * 100 + 50; // Larger radius for higher intensity
                 const duration = Math.random() * 300 + 200; // Duration in frames
                 this.stormCenters.push({ x, y, radius, intensity, life: duration });
@@ -941,14 +1221,17 @@
                         for (let j = 0; j < this.cols; j++) {
                             const gridX = j * this.gridSize;
                             const gridY = i * this.gridSize;
-                            const dx = gridX - storm.x;
-                            const dy = gridY - storm.y;
-                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (!this.isLand(gridX, gridY)) { // Only apply storm force over water
+                                const dx = gridX - storm.x;
+                                const dy = gridY - storm.y;
+                                const distance = Math.sqrt(dx * dx + dy * dy);
 
-                            if (distance < storm.radius) {
-                                const factor = (1 - distance / storm.radius) * (storm.intensity / 10) * 0.05;
-                                this.velocityX[i][j] += -dy * factor; // Rotate velocity around storm center
-                                this.velocityY[i][j] += dx * factor;
+                                if (distance < storm.radius) {
+                                    const factor = (1 - distance / storm.radius) * (storm.intensity / 10) * 0.1; // Amplified storm effect
+                                    this.velocityX[i][j] += -dy * factor; // Rotate velocity around storm center
+                                    this.velocityY[i][j] += dx * factor;
+                                }
                             }
                         }
                     }
@@ -1001,88 +1284,124 @@
             draw() {
                 // Draw a very subtle, semi-transparent black rectangle over the canvas
                 // This creates the "trail" effect for particles, making them appear as continuous lines.
-                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; // Adjust opacity for desired trail length/fading
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.01)'; // Very low alpha for long, smooth trails
                 this.ctx.fillRect(0, 0, this.width, this.height);
                 
-                // Draw background based on visualization mode
+                // Draw background based on visualization mode (optional, particles will show color)
                 if (this.visualizationMode === 'temperature') {
-                    this.drawTemperature();
+                    this.drawTemperature(); 
                 } else if (this.visualizationMode === 'salinity') {
-                    this.drawSalinity();
-                } else { // Current Flow mode (default)
-                    // In current flow mode, particles are the primary visual. Vectors are optional.
-                    if (this.showVectors) {
-                        this.drawVelocityVectors(); // Draw velocity arrows
-                    }
-                }
+                    this.drawSalinity(); 
+                } 
 
                 // Always draw particles if enabled
                 if (this.showParticles) {
                     this.drawParticles();
+                }
+                // Draw vectors only if enabled and in current flow mode
+                if (this.showVectors && this.visualizationMode === 'current') {
+                    this.drawVelocityVectors();
                 }
                 this.ctx.globalAlpha = 1.0; // Reset global alpha
             }
 
             /**
              * Draws the temperature distribution on the canvas using color coding.
+             * This provides a background grid visualization for temperature mode.
              */
             drawTemperature() {
                 for (let i = 0; i < this.rows; i++) {
                     for (let j = 0; j < this.cols; j++) {
-                        const temp = this.temperature_grid[i][j];
-                        let color;
-                        if (temp < 10) {
-                            color = '#3b82f6'; // Cold (blue)
-                        } else if (temp < 20) {
-                            color = '#10b981'; // Moderate (green)
-                        } else {
-                            color = '#f59e0b'; // Warm (orange)
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
+                        if (!this.isLand(cellX, cellY)) { // Only draw temperature over water
+                            const temp = this.temperature_grid[i][j];
+                            let color;
+                            // Map temperature from 0°C (blue) to 30°C (red)
+                            let hue = 240 - (temp / 30) * 240; // 240 (blue) to 0 (red)
+                            hue = Math.max(0, Math.min(240, hue));
+                            color = `hsla(${hue}, 100%, 50%, 0.2)`; // Semi-transparent for background
+                            
+                            this.ctx.fillStyle = color;
+                            this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
                         }
-                        this.ctx.fillStyle = color;
-                        this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
                     }
                 }
             }
 
             /**
              * Draws the salinity distribution on the canvas using color coding.
+             * This provides a background grid visualization for salinity mode.
              */
             drawSalinity() {
                 for (let i = 0; i < this.rows; i++) {
                     for (let j = 0; j < this.cols; j++) {
-                        const salt = this.salinity_grid[i][j];
-                        let color;
-                        if (salt < 33) {
-                            color = '#e0f2fe'; // Low salinity (light blue)
-                        } else if (salt < 36) {
-                            color = '#93c5fd'; // Moderate salinity (medium blue)
-                        } else {
-                            color = '#1e40af'; // High salinity (dark blue)
+                        const cellX = j * this.gridSize;
+                        const cellY = i * this.gridSize;
+                        if (!this.isLand(cellX, cellY)) { // Only draw salinity over water
+                            const salt = this.salinity_grid[i][j];
+                            let color;
+                            // Map salinity from 30ppt (light blue) to 40ppt (dark blue)
+                            let hue = 200 + ((salt - 30) / 10) * 40; // 200 (light blue) to 240 (dark blue)
+                            hue = Math.max(200, Math.min(240, hue));
+                            color = `hsla(${hue}, 100%, 50%, 0.2)`; // Semi-transparent for background
+                            
+                            this.ctx.fillStyle = color;
+                            this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
                         }
-                        this.ctx.fillStyle = color;
-                        this.ctx.fillRect(j * this.gridSize, i * this.gridSize, this.gridSize, this.gridSize);
                     }
                 }
             }
             
             /**
-             * Draws the particles on the canvas.
+             * Draws the particles on the canvas. Their color changes based on the visualization mode.
              */
             drawParticles() {
                 for (let particle of this.particles) {
                     const alpha = particle.life / particle.maxLife; // Opacity based on life
                     this.ctx.globalAlpha = alpha;
 
-                    // Color particles based on velocity magnitude for a flow-like effect
-                    // Map velocity magnitude to a hue range (e.g., blue to green)
-                    const velocityMagnitude = Math.sqrt(particle.vx * particle.vx + particle.vy * particle.vy);
-                    let hue;
-                    const maxVelColor = 50; // Max velocity for color mapping
-                    // Hue from green (120) to blue (240)
-                    hue = 120 + (velocityMagnitude / maxVelColor) * 120; 
-                    hue = Math.max(120, Math.min(240, hue)); // Clamp hue value between 120 (green) and 240 (blue)
-                    this.ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`; // HSL color with alpha
+                    let color;
+                    if (this.visualizationMode === 'current') {
+                        // Color particles based on velocity magnitude (speed)
+                        const velocityMagnitude = Math.sqrt(particle.vx * particle.vx + particle.vy * particle.vy);
+                        let hue;
+                        const maxVelColor = 100; // Increased max velocity for color mapping to spread out colors more
+                        // Hue from deep blue (240) for slow, through green (120) for moderate, to yellow (60) for fast
+                        if (velocityMagnitude < maxVelColor * 0.4) { // First 40% of speed range
+                            hue = 240 - (velocityMagnitude / (maxVelColor * 0.4)) * 120; // Blue to Green
+                        } else { // Remaining 60% of speed range
+                            hue = 120 - ((velocityMagnitude - maxVelColor * 0.4) / (maxVelColor * 0.6)) * 60; // Green to Yellow
+                        }
+                        hue = Math.max(60, Math.min(240, hue)); // Clamp hue value
+                        color = `hsla(${hue}, 100%, 50%, ${alpha})`; // HSL color with alpha
+                    } else {
+                        // Get grid coordinates for the particle's current position
+                        const gridX = Math.floor(particle.x / this.gridSize);
+                        const gridY = Math.floor(particle.y / this.gridSize);
+                        
+                        if (gridX >= 0 && gridX < this.cols && gridY >= 0 && gridY < this.rows) {
+                            if (this.visualizationMode === 'temperature') {
+                                const temp = this.temperature_grid[gridY][gridX];
+                                let hue;
+                                // Map temperature from 0°C (blue) to 30°C (red)
+                                hue = 240 - (temp / 30) * 240; // 240 (blue) to 0 (red)
+                                hue = Math.max(0, Math.min(240, hue));
+                                color = `hsla(${hue}, 100%, 50%, ${alpha})`;
+                            } else if (this.visualizationMode === 'salinity') {
+                                const salt = this.salinity_grid[gridY][gridX];
+                                let hue;
+                                // Map salinity from 30ppt (light blue) to 40ppt (dark blue)
+                                hue = 200 + ((salt - 30) / 10) * 40; // 200 (light blue) to 240 (dark blue)
+                                hue = Math.max(200, Math.min(240, hue));
+                                color = `hsla(${hue}, 100%, 50%, ${alpha})`;
+                            }
+                        } else {
+                            color = `rgba(255, 255, 255, ${alpha})`; // Default white if out of bounds
+                        }
+                    }
 
+                    this.ctx.fillStyle = color;
                     this.ctx.beginPath();
                     this.ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
                     this.ctx.fill();
@@ -1100,26 +1419,29 @@
                     for (let j = 0; j < this.cols; j += 2) {
                         const x = j * this.gridSize + this.gridSize / 2;
                         const y = i * this.gridSize + this.gridSize / 2;
-                        const vx = this.velocityX[i][j] * 50; // Scale vector length for visibility
-                        const vy = this.velocityY[i][j] * 50;
                         
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(x, y);
-                        this.ctx.lineTo(x + vx, y + vy);
-                        this.ctx.stroke();
-                        
-                        // Draw arrow head
-                        const angle = Math.atan2(vy, vx);
-                        this.ctx.save();
-                        this.ctx.translate(x + vx, y + vy);
-                        this.ctx.rotate(angle);
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(0, 0);
-                        this.ctx.lineTo(-5, -3);
-                        this.ctx.lineTo(-5, 3);
-                        this.ctx.closePath();
-                        this.ctx.fill();
-                        this.ctx.restore();
+                        if (!this.isLand(x, y)) { // Only draw vectors over water
+                            const vx = this.velocityX[i][j] * 50; // Scale vector length for visibility
+                            const vy = this.velocityY[i][j] * 50;
+                            
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(x, y);
+                            this.ctx.lineTo(x + vx, y + vy);
+                            this.ctx.stroke();
+                            
+                            // Draw arrow head
+                            const angle = Math.atan2(vy, vx);
+                            this.ctx.save();
+                            this.ctx.translate(x + vx, y + vy);
+                            this.ctx.rotate(angle);
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(0, 0);
+                            this.ctx.lineTo(-5, -3);
+                            this.ctx.lineTo(-5, 3);
+                            this.ctx.closePath();
+                            this.ctx.fill();
+                            this.ctx.restore();
+                        }
                     }
                 }
             }
@@ -1180,6 +1502,16 @@
                 document.getElementById('iceMeltRateValue').textContent = this.iceMeltRate;
                 document.getElementById('stormIntensityValue').textContent = this.stormIntensity;
                 document.getElementById('extremeWeatherFreqValue').textContent = this.extremeWeatherFreq;
+                document.getElementById('currentYearValue').textContent = this.currentYear;
+                // Update active scenario text
+                const scenarioText = {
+                    'current': 'Current Settings',
+                    'businessAsUsual': 'Business as Usual (High Warming)',
+                    'parisAgreement': 'Paris Agreement (Moderate Warming)',
+                    'netZero': 'Net Zero (Low Warming)'
+                };
+                document.getElementById('activeScenarioText').textContent = scenarioText[this.activeScenario];
+
 
                 this.updateClimateWarning(); // Update climate warning box
             }
@@ -1191,9 +1523,9 @@
                 let impact = 'moderate';
                 const warningDiv = document.querySelector('.climate-warning');
                 // Determine impact level
-                if (this.globalTempRise > 2.0 || this.seaLevelRise > 0.5 || this.iceMeltRate > 50 || this.stormIntensity > 7) {
+                if (this.globalTempRise > 2.5 || this.seaLevelRise > 0.6 || this.iceMeltRate > 60 || this.stormIntensity > 7) {
                     impact = 'severe';
-                } else if (this.globalTempRise > 1.0 || this.seaLevelRise > 0.1 || this.iceMeltRate > 20 || this.stormIntensity > 4) {
+                } else if (this.globalTempRise > 1.5 || this.seaLevelRise > 0.3 || this.iceMeltRate > 30 || this.stormIntensity > 4) {
                     impact = 'elevated';
                 }
                 document.getElementById('climate-impact-text').textContent = impact;
@@ -1224,6 +1556,22 @@
 
                 // Reset button
                 document.getElementById('reset').addEventListener('click', () => {
+                    this.currentYear = this.startYear; // Reset year
+                    this.activeScenario = 'current'; // Reset scenario
+                    this.globalTempRise = this.initialClimateParams.tempRise;
+                    this.seaLevelRise = this.initialClimateParams.seaLevel;
+                    this.iceMeltRate = this.initialClimateParams.iceMelt;
+                    this.stormIntensity = this.initialClimateParams.stormIntensity;
+                    this.extremeWeatherFreq = this.initialClimateParams.extremeFreq;
+
+                    document.getElementById('yearSlider').value = this.currentYear; // Update slider
+                    // Reset all climate sliders to initial values
+                    document.getElementById('globalTempRise').value = this.globalTempRise;
+                    document.getElementById('seaLevelRise').value = this.seaLevelRise;
+                    document.getElementById('iceMeltRate').value = this.iceMeltRate;
+                    document.getElementById('stormIntensity').value = this.stormIntensity;
+                    document.getElementById('extremeWeatherFreq').value = this.extremeWeatherFreq;
+
                     this.initializeGrid(); // Reset fluid grid
                     this.initializeParticles(); // Reset particles
                     this.time = 0; // Reset simulation time
@@ -1295,19 +1643,24 @@
                     this.initializeParticles(); // Re-initialize particles with new count
                 });
 
-                // Climate Change Effects listeners
+                // Climate Change Effects sliders - no direct effect on this.globalTempRise etc. now,
+                // as these are controlled by the timeline/scenario.
+                // These sliders will *display* the interpolated values.
+                // The actual input events for these sliders will be removed or repurposed if needed.
+                // For now, they are just for display in the UI.
                 document.getElementById('globalTempRise').addEventListener('input', (e) => {
-                    this.globalTempRise = parseFloat(e.target.value);
+                    // This slider now only updates the display, the value is controlled by the year slider
+                    // this.globalTempRise = parseFloat(e.target.value); // Removed direct assignment
                     // Randomly add a flood indicator when temp rise is high
                     if (this.showClimateEffects && this.globalTempRise > 1.5 && Math.random() < 0.01) {
                          this.addClimateIndicator(Math.random() * this.width, this.height * (0.8 + Math.random() * 0.2), 'flood');
                     }
                 });
                 document.getElementById('seaLevelRise').addEventListener('input', (e) => {
-                    this.seaLevelRise = parseFloat(e.target.value);
+                    // this.seaLevelRise = parseFloat(e.target.value); // Removed direct assignment
                 });
                 document.getElementById('iceMeltRate').addEventListener('input', (e) => {
-                    this.iceMeltRate = parseFloat(e.target.value);
+                    // this.iceMeltRate = parseFloat(e.target.value); // Removed direct assignment
                     // Randomly add an ice melt indicator near poles
                     if (this.showClimateEffects && this.iceMeltRate > 50 && Math.random() < 0.005) {
                         const x = this.width * (0.4 + Math.random() * 0.2);
@@ -1325,11 +1678,35 @@
 
                 // Weather Patterns listeners
                 document.getElementById('stormIntensity').addEventListener('input', (e) => {
-                    this.stormIntensity = parseFloat(e.target.value);
+                    // this.stormIntensity = parseFloat(e.target.value); // Removed direct assignment
                 });
                 document.getElementById('extremeWeatherFreq').addEventListener('input', (e) => {
-                    this.extremeWeatherFreq = parseFloat(e.target.value);
+                    // this.extremeWeatherFreq = parseFloat(e.target.value); // Removed direct assignment
                 });
+
+                // Timeline controls
+                document.getElementById('yearSlider').addEventListener('input', (e) => {
+                    this.currentYear = parseInt(e.target.value);
+                    this.activeScenario = 'current'; // When manually moving slider, revert to 'current' scenario logic
+                    document.getElementById('activeScenarioText').textContent = 'Current Settings (Manual)';
+                });
+
+                document.getElementById('scenarioBusinessAsUsual').addEventListener('click', () => {
+                    this.activeScenario = 'businessAsUsual';
+                    this.currentYear = this.startYear; // Reset year to start of scenario
+                    document.getElementById('yearSlider').value = this.currentYear;
+                });
+                document.getElementById('scenarioParisAgreement').addEventListener('click', () => {
+                    this.activeScenario = 'parisAgreement';
+                    this.currentYear = this.startYear; // Reset year to start of scenario
+                    document.getElementById('yearSlider').value = this.currentYear;
+                });
+                document.getElementById('scenarioNetZero').addEventListener('click', () => {
+                    this.activeScenario = 'netZero';
+                    this.currentYear = this.startYear; // Reset year to start of scenario
+                    document.getElementById('yearSlider').value = this.currentYear;
+                });
+
 
                 // Mouse interaction for adding currents on canvas
                 this.canvas.addEventListener('mousedown', (e) => {
@@ -1353,8 +1730,13 @@
                             const dx = (this.mouseX - this.lastMouseX) * 0.1;
                             const dy = (this.mouseY - this.lastMouseY) * 0.1;
 
-                            this.velocityX[gridY][gridX] += dx;
-                            this.velocityY[gridY][gridX] += dy;
+                            const targetX = gridX * this.gridSize;
+                            const targetY = gridY * this.gridSize;
+
+                            if (!this.isLand(targetX, targetY)) { // Only apply force if over water
+                                this.velocityX[gridY][gridX] += dx;
+                                this.velocityY[gridY][gridX] += dy;
+                            }
                         }
 
                         this.lastMouseX = this.mouseX;
@@ -1419,5 +1801,6 @@
     </script>
 </body>
 </html>
+
 
 
